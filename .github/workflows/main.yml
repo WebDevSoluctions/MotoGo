@@ -35,55 +35,27 @@ jobs:
         working-directory: ios
         run: pod install --repo-update
 
-      - name: Desativar assinatura do Xcode
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("ios/Runner.xcodeproj/project.pbxproj")
-          text = path.read_text()
-
-          replacements = {
-              'CODE_SIGN_STYLE = Automatic;': 'CODE_SIGN_STYLE = Manual;',
-              'CODE_SIGN_IDENTITY = "iPhone Developer";': 'CODE_SIGN_IDENTITY = "";',
-              'CODE_SIGN_IDENTITY = "Apple Development";': 'CODE_SIGN_IDENTITY = "";',
-              'DEVELOPMENT_TEAM = ': '// DEVELOPMENT_TEAM = ',
-          }
-
-          for old, new in replacements.items():
-              text = text.replace(old, new)
-
-          path.write_text(text)
-          print("Configurações de assinatura ajustadas.")
-
-      - name: Verificar configurações de assinatura
-        run: |
-          grep -nE "CODE_SIGN|DEVELOPMENT_TEAM|PROVISIONING_PROFILE" \
-            ios/Runner.xcodeproj/project.pbxproj || true
-
       - name: Verificar projeto
         run: flutter doctor -v
 
-      - name: Build iOS sem assinatura
+      - name: Build iOS Simulator
         run: |
-          flutter build ios \
-            --release \
-            --no-codesign
+          flutter build ios --simulator --debug
 
       - name: Verificar aplicativo
         run: |
-          if [ ! -d "build/ios/iphoneos/Runner.app" ]; then
+          if [ ! -d "build/ios/iphonesimulator/Runner.app" ]; then
             echo "ERRO: Runner.app não foi encontrado."
             exit 1
           fi
 
           echo "========================================"
-          echo "MotoGo iOS build criado com sucesso!"
+          echo "MotoGo iOS Simulator build criado!"
           echo "========================================"
 
       - name: Salvar aplicativo iOS
         uses: actions/upload-artifact@v4
         with:
-          name: MotoGo-iOS-build
-          path: build/ios/iphoneos/Runner.app
+          name: MotoGo-iOS-Simulator
+          path: build/ios/iphonesimulator/Runner.app
           if-no-files-found: error
