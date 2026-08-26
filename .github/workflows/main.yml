@@ -23,17 +23,17 @@ jobs:
       - name: Verificar Flutter
         run: flutter --version
 
-      - name: Instalar dependências
+      - name: Instalar dependências Flutter
         run: flutter pub get
-
-      - name: Preparar configuração iOS
-        run: flutter build ios --config-only
 
       - name: Instalar CocoaPods
         run: |
-          cd ios
-          pod install
-          cd ..
+          sudo gem install cocoapods
+          pod --version
+
+      - name: Instalar pods do iOS
+        working-directory: ios
+        run: pod install --repo-update
 
       - name: Verificar projeto
         run: flutter doctor -v
