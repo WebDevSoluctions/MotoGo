@@ -1,0 +1,40 @@
+name: MotoGo iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout do projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Verificar Flutter
+        run: flutter --version
+
+      - name: Instalar dependências
+        run: flutter pub get
+
+      - name: Verificar projeto
+        run: flutter doctor -v
+
+      - name: Build iOS
+        run: flutter build ios --release --no-codesign
+
+      - name: Salvar aplicativo iOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotoGo-iOS-build
+          path: build/ios/iphoneos/Runner.app
+          if-no-files-found: error
