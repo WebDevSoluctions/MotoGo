@@ -38,8 +38,31 @@ jobs:
       - name: Verificar projeto
         run: flutter doctor -v
 
-      - name: Build iOS
-        run: flutter build ios --release --no-codesign
+      - name: Build iOS sem assinatura
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Garantir build sem assinatura
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verificar aplicativo
+        run: |
+          if [ ! -d "build/ios/iphoneos/Runner.app" ]; then
+            echo "Runner.app não foi encontrado."
+            exit 1
+          fi
+
+          echo "Runner.app encontrado com sucesso."
 
       - name: Salvar aplicativo iOS
         uses: actions/upload-artifact@v4
