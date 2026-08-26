@@ -3,11 +3,13 @@ import UIKit
 import UserNotifications
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UNUserNotificationCenterDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+
     UNUserNotificationCenter.current().delegate = self
     application.registerForRemoteNotifications()
 
@@ -17,15 +19,18 @@ import UserNotifications
     )
   }
 
-  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+  func didInitializeImplicitFlutterEngine(
+    _ engineBridge: FlutterImplicitEngineBridge
+  ) {
+    GeneratedPluginRegistrant.register(
+      with: engineBridge.pluginRegistry
+    )
   }
 
   override func application(
     _ application: UIApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
-    // Firebase Messaging receives the APNs token through its native integration.
     super.application(
       application,
       didRegisterForRemoteNotificationsWithDeviceToken: deviceToken
@@ -37,27 +42,28 @@ import UserNotifications
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {
     print("MotoGo APNs registration failed: \(error)")
+
     super.application(
       application,
       didFailToRegisterForRemoteNotificationsWithError: error
     )
   }
 
-  // Show FCM/APNs notifications while MotoGo is in the foreground.
-  func userNotificationCenter(
+  override func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
-    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    withCompletionHandler completionHandler:
+      @escaping (UNNotificationPresentationOptions) -> Void
   ) {
     completionHandler([.alert, .badge, .sound])
   }
 
-  func userNotificationCenter(
+  override func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     didReceive response: UNNotificationResponse,
-    withCompletionHandler completionHandler: @escaping () -> Void
+    withCompletionHandler completionHandler:
+      @escaping () -> Void
   ) {
-    // firebase_messaging receives the tap through its normal iOS integration.
     completionHandler()
   }
 }
