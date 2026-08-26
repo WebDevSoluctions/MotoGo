@@ -26,6 +26,15 @@ jobs:
       - name: Instalar dependências
         run: flutter pub get
 
+      - name: Preparar configuração iOS
+        run: flutter build ios --config-only
+
+      - name: Instalar CocoaPods
+        run: |
+          cd ios
+          pod install
+          cd ..
+
       - name: Verificar projeto
         run: flutter doctor -v
 
