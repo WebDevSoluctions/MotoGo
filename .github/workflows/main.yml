@@ -35,6 +35,32 @@ jobs:
         working-directory: ios
         run: pod install --repo-update
 
+      - name: Desativar assinatura do Xcode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = path.read_text()
+
+          replacements = {
+              'CODE_SIGN_STYLE = Automatic;': 'CODE_SIGN_STYLE = Manual;',
+              'CODE_SIGN_IDENTITY = "iPhone Developer";': 'CODE_SIGN_IDENTITY = "";',
+              'CODE_SIGN_IDENTITY = "Apple Development";': 'CODE_SIGN_IDENTITY = "";',
+              'DEVELOPMENT_TEAM = ': '// DEVELOPMENT_TEAM = ',
+          }
+
+          for old, new in replacements.items():
+              text = text.replace(old, new)
+
+          path.write_text(text)
+          print("Configurações de assinatura ajustadas.")
+
+      - name: Verificar configurações de assinatura
+        run: |
+          grep -nE "CODE_SIGN|DEVELOPMENT_TEAM|PROVISIONING_PROFILE" \
+            ios/Runner.xcodeproj/project.pbxproj || true
+
       - name: Verificar projeto
         run: flutter doctor -v
 
