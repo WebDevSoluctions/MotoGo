@@ -11,9 +11,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      TEAM_ID: 837DURTJ6M
-      BUNDLE_ID: com.webdevsolutions.motogo
-      PROFILE_NAME: MotoGo_App_Store_2026
+      APPLE_TEAM_ID: 837DURTJ6M
+      APPLE_BUNDLE_ID: com.webdevsolutions.motogo
 
     steps:
 
@@ -26,7 +25,7 @@ jobs:
       # =========================================================
       # 2. Flutter
       # =========================================================
-      - name: Configurar Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -44,83 +43,72 @@ jobs:
       # =========================================================
       # 4. CocoaPods
       # =========================================================
-      - name: Instalar CocoaPods
+      - name: Install CocoaPods
         run: |
           sudo gem install cocoapods
           pod --version
 
-      - name: Pod install
+      - name: Install Pods
         working-directory: ios
-        run: |
-          pod install --repo-update
+        run: pod install --repo-update
 
       # =========================================================
-      # 5. Keychain
+      # 5. Criar Keychain
       # =========================================================
-      - name: Criar Keychain
+      - name: Create signing keychain
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
         run: |
           set -e
 
-          KEYCHAIN="$RUNNER_TEMP/motogo-build.keychain-db"
-          P12="$RUNNER_TEMP/MotoGo_Distribution.p12"
-
-          echo "$CERTIFICATE_BASE64" | base64 --decode > "$P12"
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/MotoGo_Distribution.p12"
 
           security create-keychain \
             -p "github-actions" \
-            "$KEYCHAIN"
+            "$RUNNER_TEMP/build.keychain-db"
 
           security set-keychain-settings \
             -lut 21600 \
-            "$KEYCHAIN"
+            "$RUNNER_TEMP/build.keychain-db"
 
           security unlock-keychain \
             -p "github-actions" \
-            "$KEYCHAIN"
+            "$RUNNER_TEMP/build.keychain-db"
 
-          security import "$P12" \
+          security import \
+            "$RUNNER_TEMP/MotoGo_Distribution.p12" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
             -f pkcs12 \
-            -k "$KEYCHAIN"
+            -k "$RUNNER_TEMP/build.keychain-db"
 
           security list-keychains \
             -d user \
-            -s "$KEYCHAIN" login.keychain-db
+            -s "$RUNNER_TEMP/build.keychain-db"
 
           security default-keychain \
-            -s "$KEYCHAIN"
+            -s "$RUNNER_TEMP/build.keychain-db"
 
           security unlock-keychain \
             -p "github-actions" \
-            "$KEYCHAIN"
-
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "github-actions" \
-            "$KEYCHAIN"
-
-          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+            "$RUNNER_TEMP/build.keychain-db"
 
       # =========================================================
       # 6. Verificar certificado
       # =========================================================
-      - name: Verificar certificado
+      - name: Verify Apple Distribution certificate
         run: |
           security find-identity \
             -v \
             -p codesigning \
-            "$KEYCHAIN"
+            "$RUNNER_TEMP/build.keychain-db"
 
       # =========================================================
-      # 7. Provisioning Profile
+      # 7. Instalar Provisioning Profile
       # =========================================================
-      - name: Instalar Provisioning Profile
+      - name: Install provisioning profile
         env:
           PROFILE_BASE64: ${{ secrets.APPSTORE_PROVISIONING_PROFILE_BASE64 }}
         run: |
@@ -131,85 +119,74 @@ jobs:
           mkdir -p "$PROFILE_DIR"
 
           echo "$PROFILE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/profile.mobileprovision"
+            > "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision"
+
+          cp \
+            "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
+            "$PROFILE_DIR/MotoGo_App_Store.mobileprovision"
+
+      # =========================================================
+      # 8. Ler dados do Provisioning Profile
+      # =========================================================
+      - name: Read provisioning profile
+        run: |
+          set -e
 
           security cms \
             -D \
-            -i "$RUNNER_TEMP/profile.mobileprovision" \
+            -i "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
             > "$RUNNER_TEMP/profile.plist"
 
-          UUID=$(/usr/libexec/PlistBuddy \
-            -c "Print :UUID" \
-            "$RUNNER_TEMP/profile.plist")
-
-          NAME=$(/usr/libexec/PlistBuddy \
+          PROFILE_NAME=$(
+            /usr/libexec/PlistBuddy \
             -c "Print :Name" \
-            "$RUNNER_TEMP/profile.plist")
+            "$RUNNER_TEMP/profile.plist"
+          )
 
-          APP_ID=$(/usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:application-identifier" \
-            "$RUNNER_TEMP/profile.plist")
+          PROFILE_UUID=$(
+            /usr/libexec/PlistBuddy \
+            -c "Print :UUID" \
+            "$RUNNER_TEMP/profile.plist"
+          )
 
-          TEAM=$(/usr/libexec/PlistBuddy \
+          PROFILE_TEAM=$(
+            /usr/libexec/PlistBuddy \
             -c "Print :TeamIdentifier:0" \
-            "$RUNNER_TEMP/profile.plist")
+            "$RUNNER_TEMP/profile.plist"
+          )
 
-          echo "======================================"
-          echo "PROFILE"
-          echo "======================================"
-          echo "Name: $NAME"
-          echo "UUID: $UUID"
-          echo "App ID: $APP_ID"
-          echo "Team: $TEAM"
-          echo "======================================"
+          PROFILE_APP_ID=$(
+            /usr/libexec/PlistBuddy \
+            -c "Print :Entitlements:application-identifier" \
+            "$RUNNER_TEMP/profile.plist"
+          )
 
-          if [ "$TEAM" != "$TEAM_ID" ]; then
-            echo "ERRO: Team ID incorreto."
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "Provisioning Profile"
+          echo "========================================"
+          echo "Name: $PROFILE_NAME"
+          echo "UUID: $PROFILE_UUID"
+          echo "Team: $PROFILE_TEAM"
+          echo "App ID: $PROFILE_APP_ID"
+          echo "========================================"
+
+          if [ "$PROFILE_TEAM" != "$APPLE_TEAM_ID" ]; then
+            echo "ERRO: Team ID do profile não corresponde."
             exit 1
           fi
 
-          if [ "$APP_ID" != "$TEAM_ID.$BUNDLE_ID" ]; then
-            echo "ERRO: Bundle ID incorreto."
-            echo "Esperado: $TEAM_ID.$BUNDLE_ID"
-            echo "Recebido: $APP_ID"
+          if [ "$PROFILE_APP_ID" != "$APPLE_TEAM_ID.$APPLE_BUNDLE_ID" ]; then
+            echo "ERRO: Bundle ID do provisioning profile não corresponde."
+            echo "Esperado: $APPLE_TEAM_ID.$APPLE_BUNDLE_ID"
+            echo "Encontrado: $PROFILE_APP_ID"
             exit 1
           fi
 
-          cp "$RUNNER_TEMP/profile.mobileprovision" \
-            "$PROFILE_DIR/$UUID.mobileprovision"
-
-          echo "PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
-          echo "PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
-
       # =========================================================
-      # 8. Verificar Push Notifications
-      # =========================================================
-      - name: Verificar Push Notifications
-        run: |
-          echo "======================================"
-          echo "ENTITLEMENTS"
-          echo "======================================"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements" \
-            "$RUNNER_TEMP/profile.plist" || true
-
-          if /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:aps-environment" \
-            "$RUNNER_TEMP/profile.plist" >/dev/null 2>&1
-          then
-            APS=$(/usr/libexec/PlistBuddy \
-              -c "Print :Entitlements:aps-environment" \
-              "$RUNNER_TEMP/profile.plist")
-
-            echo "Push Notifications: $APS"
-          else
-            echo "AVISO: aps-environment não está no provisioning profile."
-            echo "O build pode funcionar, mas Push Notifications não estará autorizado."
-          fi
-
-      # =========================================================
-      # 9. Limpar Flutter
+      # 9. Flutter clean
       # =========================================================
       - name: Flutter clean
         run: |
@@ -217,86 +194,17 @@ jobs:
           flutter pub get
 
       # =========================================================
-      # 10. Corrigir assinatura dos Pods
+      # 10. Garantir Pods instalados
       # =========================================================
-      - name: Desativar assinatura dos Pods
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path("ios/Podfile")
-
-          text = path.read_text()
-
-          if "CODE_SIGNING_ALLOWED" not in text:
-              old = """post_install do |installer|
-                installer.pods_project.targets.each do |target|
-                  flutter_additional_ios_build_settings(target)
-              """
-
-              new = """post_install do |installer|
-                installer.pods_project.targets.each do |target|
-                  flutter_additional_ios_build_settings(target)
-
-                  target.build_configurations.each do |config|
-                    config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                    config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-                    config.build_settings['CODE_SIGNING_IDENTITY'] = ''
-                    config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ''
-                  end
-              """
-
-              if old in text:
-                  text = text.replace(old, new)
-
-          path.write_text(text)
-          PY
-
-          cat ios/Podfile
-
-      # =========================================================
-      # 11. Reinstalar Pods
-      # =========================================================
-      - name: Reinstalar Pods
+      - name: Reinstall Pods
         working-directory: ios
         run: |
-          rm -rf Pods
-          rm -f Podfile.lock
-          pod install
+          pod install --repo-update
 
       # =========================================================
-      # 12. Forçar assinatura manual somente no Runner
+      # 11. Criar ExportOptions.plist
       # =========================================================
-      - name: Configurar assinatura do Runner
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path("ios/Runner.xcodeproj/project.pbxproj")
-          text = path.read_text()
-
-          replacements = {
-              'CODE_SIGN_STYLE = Automatic;': 'CODE_SIGN_STYLE = Manual;',
-              'CODE_SIGN_IDENTITY = "Apple Development";': 'CODE_SIGN_IDENTITY = "Apple Distribution";',
-              'CODE_SIGN_IDENTITY[sdk=iphoneos*] = "Apple Development";':
-                  'CODE_SIGN_IDENTITY[sdk=iphoneos*] = "Apple Distribution";',
-          }
-
-          for old, new in replacements.items():
-              text = text.replace(old, new)
-
-          path.write_text(text)
-          PY
-
-          echo "Configuração do Runner:"
-          grep -n \
-            -E "CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE" \
-            ios/Runner.xcodeproj/project.pbxproj || true
-
-      # =========================================================
-      # 13. Criar ExportOptions.plist
-      # =========================================================
-      - name: Criar ExportOptions.plist
+      - name: Create ExportOptions.plist
         run: |
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -315,58 +223,50 @@ jobs:
               <string>manual</string>
 
               <key>teamID</key>
-              <string>837DURTJ6M</string>
+              <string>${APPLE_TEAM_ID}</string>
 
               <key>provisioningProfiles</key>
               <dict>
-                  <key>com.webdevsolutions.motogo</key>
+                  <key>${APPLE_BUNDLE_ID}</key>
                   <string>${PROFILE_NAME}</string>
               </dict>
 
-              <key>compileBitcode</key>
-              <false/>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
 
               <key>stripSwiftSymbols</key>
               <true/>
 
-              <key>uploadSymbols</key>
-              <true/>
+              <key>compileBitcode</key>
+              <false/>
 
           </dict>
           </plist>
           EOF
 
-          echo "======================================"
+          echo "========================================"
+          echo "ExportOptions.plist"
+          echo "========================================"
+
           cat ios/ExportOptions.plist
-          echo "======================================"
 
       # =========================================================
-      # 14. Mostrar configurações efetivas
+      # 12. Verificar projeto Xcode
       # =========================================================
-      - name: Verificar configuração Xcode
+      - name: Check Xcode project
         run: |
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
-            -configuration Release \
             -showBuildSettings \
             | grep -E \
-            "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER" \
-            || true
+              "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" \
+              || true
 
       # =========================================================
-      # 15. Build sem assinatura
+      # 13. Criar Archive
       # =========================================================
-      - name: Flutter build iOS
-        run: |
-          flutter build ios \
-            --release \
-            --no-codesign
-
-      # =========================================================
-      # 16. Criar Archive
-      # =========================================================
-      - name: Criar Archive iOS
+      - name: Archive iOS App
         run: |
           set -o pipefail
 
@@ -378,30 +278,35 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$APPLE_BUNDLE_ID" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
             archive \
-            | tee "$RUNNER_TEMP/archive.log"
+            | tee "$RUNNER_TEMP/xcodebuild-archive.log"
 
       # =========================================================
-      # 17. Verificar Archive
+      # 14. Verificar Archive
       # =========================================================
-      - name: Verificar Archive
+      - name: Verify Archive
         run: |
-          if [ ! -d "build/ios/archive/Runner.xcarchive" ]; then
+          set -e
+
+          ARCHIVE="build/ios/archive/Runner.xcarchive"
+
+          if [ ! -d "$ARCHIVE" ]; then
             echo "ERRO: Archive não foi criado."
             exit 1
           fi
 
           echo "Archive criado:"
-          ls -lah build/ios/archive/
+          ls -lah "$ARCHIVE"
 
       # =========================================================
-      # 18. Exportar IPA
+      # 15. Exportar IPA
       # =========================================================
-      - name: Exportar IPA
+      - name: Export IPA
         run: |
           set -e
 
@@ -414,30 +319,36 @@ jobs:
             -exportOptionsPlist "$GITHUB_WORKSPACE/ios/ExportOptions.plist"
 
       # =========================================================
-      # 19. Verificar IPA
+      # 16. Verificar IPA
       # =========================================================
-      - name: Verificar IPA
+      - name: Verify IPA
         run: |
-          echo "======================================"
-          echo "IPA"
-          echo "======================================"
+          set -e
 
-          find build/ios/ipa -maxdepth 2 -type f -print
+          echo "========================================"
+          echo "Arquivos gerados"
+          echo "========================================"
+
+          find build/ios/ipa \
+            -maxdepth 2 \
+            -type f \
+            -print
 
           IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
 
           if [ -z "$IPA" ]; then
-            echo "ERRO: IPA não encontrado."
+            echo "ERRO: IPA não foi criado."
             exit 1
           fi
 
-          echo "IPA encontrado:"
+          echo ""
+          echo "IPA:"
           echo "$IPA"
 
       # =========================================================
-      # 20. Verificar assinatura
+      # 17. Verificar assinatura
       # =========================================================
-      - name: Verificar assinatura IPA
+      - name: Verify IPA signature
         run: |
           set -e
 
@@ -448,62 +359,102 @@ jobs:
           unzip -q "$IPA" \
             -d "$RUNNER_TEMP/ipa-check"
 
-          APP=$(find \
-            "$RUNNER_TEMP/ipa-check/Payload" \
+          APP=$(find "$RUNNER_TEMP/ipa-check/Payload" \
             -maxdepth 1 \
             -name "*.app" \
             -type d \
             | head -n 1)
 
-          echo "======================================"
-          echo "APP"
+          echo "========================================"
+          echo "Aplicativo"
+          echo "========================================"
+
           echo "$APP"
-          echo "======================================"
+
+          echo ""
+          echo "========================================"
+          echo "Assinatura"
+          echo "========================================"
 
           codesign \
             -dv \
             --verbose=4 \
             "$APP" \
-            2>&1 || true
+            2>&1
 
-          echo "======================================"
+          echo ""
+          echo "========================================"
           echo "Entitlements"
-          echo "======================================"
+          echo "========================================"
 
           codesign \
             -d \
             --entitlements :- \
             "$APP" \
-            2>/dev/null || true
+            2>/dev/null \
+            || true
 
       # =========================================================
-      # 21. Upload IPA
+      # 18. Validar Bundle ID
       # =========================================================
-      - name: Salvar IPA
+      - name: Verify Bundle ID
+        run: |
+          set -e
+
+          IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
+
+          mkdir -p "$RUNNER_TEMP/bundle-check"
+
+          unzip -q "$IPA" \
+            -d "$RUNNER_TEMP/bundle-check"
+
+          APP=$(find "$RUNNER_TEMP/bundle-check/Payload" \
+            -maxdepth 1 \
+            -name "*.app" \
+            -type d \
+            | head -n 1)
+
+          BUNDLE_ID=$(
+            /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIdentifier" \
+            "$APP/Info.plist"
+          )
+
+          echo "Bundle ID: $BUNDLE_ID"
+
+          if [ "$BUNDLE_ID" != "$APPLE_BUNDLE_ID" ]; then
+            echo "ERRO: Bundle ID incorreto."
+            exit 1
+          fi
+
+      # =========================================================
+      # 19. Upload IPA
+      # =========================================================
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MotoGo-iOS-IPA
+          name: MotoGo-iOS-App-Store-IPA
           path: build/ios/ipa/*.ipa
           if-no-files-found: error
           retention-days: 30
 
       # =========================================================
-      # 22. Upload Archive
+      # 20. Upload Archive
       # =========================================================
-      - name: Salvar Archive
+      - name: Upload Archive
         uses: actions/upload-artifact@v4
         with:
-          name: MotoGo-iOS-Archive
+          name: MotoGo-iOS-App-Store-Archive
           path: build/ios/archive/Runner.xcarchive
           if-no-files-found: error
           retention-days: 30
 
       # =========================================================
-      # 23. Limpeza
+      # 21. Limpar Keychain
       # =========================================================
-      - name: Limpar Keychain
+      - name: Cleanup signing keychain
         if: always()
         run: |
-          if [ -n "${KEYCHAIN:-}" ]; then
-            security delete-keychain "$KEYCHAIN" || true
-          fi
+          security delete-keychain \
+            "$RUNNER_TEMP/build.keychain-db" \
+            || true
