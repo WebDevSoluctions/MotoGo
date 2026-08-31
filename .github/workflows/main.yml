@@ -31,7 +31,7 @@ jobs:
         run: flutter --version
 
       # ==========================================
-      # 3. Dependências
+      # 3. Dependências Flutter
       # ==========================================
       - name: Instalar dependências Flutter
         run: flutter pub get
@@ -44,14 +44,17 @@ jobs:
           sudo gem install cocoapods
           pod --version
 
+      - name: Instalar Pods do iOS
+        working-directory: ios
+        run: pod install --repo-update
+
       # ==========================================
-      # 5. Instalar certificado Apple
+      # 5. Certificado Apple Distribution
       # ==========================================
       - name: Preparar certificado Apple
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
-
         run: |
           echo "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/MotoGo_Distribution.p12"
 
@@ -67,8 +70,7 @@ jobs:
             -p "github-actions" \
             "$RUNNER_TEMP/build.keychain-db"
 
-          security import \
-            "$RUNNER_TEMP/MotoGo_Distribution.p12" \
+          security import "$RUNNER_TEMP/MotoGo_Distribution.p12" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
@@ -87,20 +89,19 @@ jobs:
             "$RUNNER_TEMP/build.keychain-db"
 
       # ==========================================
-      # 6. Instalar Provisioning Profile
+      # 6. Provisioning Profile
       # ==========================================
       - name: Instalar Provisioning Profile
         env:
           PROFILE_BASE64: ${{ secrets.APPSTORE_PROVISIONING_PROFILE_BASE64 }}
-
         run: |
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
           echo "$PROFILE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision"
+            > "$RUNNER_TEMP/MotoGo_App_Store_2026.mobileprovision"
 
-          cp "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
-            "$HOME/Library/MobileDevice/Provisioning Profiles/MotoGo_App_Store.mobileprovision"
+          cp "$RUNNER_TEMP/MotoGo_App_Store_2026.mobileprovision" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/MotoGo_App_Store_2026.mobileprovision"
 
       # ==========================================
       # 7. Verificar certificado
@@ -108,7 +109,7 @@ jobs:
       - name: Verificar certificado Apple
         run: |
           echo "========================================"
-          echo "CERTIFICADOS DISPONÍVEIS"
+          echo "CERTIFICADOS DE ASSINATURA"
           echo "========================================"
 
           security find-identity \
@@ -123,7 +124,7 @@ jobs:
         run: |
           security cms \
             -D \
-            -i "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
+            -i "$RUNNER_TEMP/MotoGo_App_Store_2026.mobileprovision" \
             > "$RUNNER_TEMP/profile.plist"
 
           echo "========================================"
@@ -148,18 +149,10 @@ jobs:
           echo "Push Notifications:"
           /usr/libexec/PlistBuddy \
             -c "Print :Entitlements:aps-environment" \
-            "$RUNNER_TEMP/profile.plist"
+            "$RUNNER_TEMP/profile.plist" || echo "aps-environment não encontrado"
 
       # ==========================================
-      # 9. Instalar Pods
-      # ==========================================
-      - name: Instalar Pods do iOS
-        working-directory: ios
-        run: |
-          pod install --repo-update
-
-      # ==========================================
-      # 10. Limpar projeto
+      # 9. Limpar Flutter
       # ==========================================
       - name: Limpar projeto Flutter
         run: |
@@ -167,15 +160,24 @@ jobs:
           flutter pub get
 
       # ==========================================
-      # 11. Garantir Pods atualizados
+      # 10. Atualizar Pods
       # ==========================================
       - name: Atualizar Pods
         working-directory: ios
         run: |
-          pod install
+          pod install --repo-update
 
       # ==========================================
-      # 12. Criar ExportOptions.plist
+      # 11. Build Flutter iOS sem assinatura
+      # ==========================================
+      - name: Build Flutter iOS Release
+        run: |
+          flutter build ios \
+            --release \
+            --no-codesign
+
+      # ==========================================
+      # 12. ExportOptions.plist
       # ==========================================
       - name: Criar ExportOptions.plist
         run: |
@@ -215,28 +217,11 @@ jobs:
           </plist>
           EOF
 
-      # ==========================================
-      # 13. Build Flutter
-      # ==========================================
-      - name: Build Flutter iOS
-        run: |
-          flutter build ios \
-            --release \
-            --no-codesign
+          echo "ExportOptions.plist criado:"
+          cat ios/ExportOptions.plist
 
       # ==========================================
-      # 14. Aplicar configuração de assinatura
-      # ==========================================
-      - name: Configurar assinatura do Runner
-        run: |
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            ios/Runner/Info.plist || true
-
-          echo "Configurando assinatura do Runner..."
-
-      # ==========================================
-      # 15. Criar Archive
+      # 13. Criar Archive
       # ==========================================
       - name: Criar Archive iOS
         run: |
@@ -249,13 +234,27 @@ jobs:
             -sdk iphoneos \
             -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
             DEVELOPMENT_TEAM=837DURTJ6M \
-            CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="MotoGo App Store 2026" \
             archive
 
       # ==========================================
-      # 16. Exportar IPA
+      # 14. Verificar Archive
+      # ==========================================
+      - name: Verificar Archive
+        run: |
+          if [ ! -d "build/ios/archive/Runner.xcarchive" ]; then
+            echo "ERRO: Archive não foi criado."
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "ARCHIVE CRIADO COM SUCESSO"
+          echo "========================================"
+
+          ls -lah build/ios/archive/
+
+      # ==========================================
+      # 15. Exportar IPA
       # ==========================================
       - name: Exportar IPA
         run: |
@@ -268,7 +267,7 @@ jobs:
             -exportOptionsPlist ios/ExportOptions.plist
 
       # ==========================================
-      # 17. Verificar IPA
+      # 16. Verificar IPA
       # ==========================================
       - name: Verificar IPA
         run: |
@@ -281,9 +280,7 @@ jobs:
             -type f \
             -print
 
-          IPA=$(find build/ios/ipa \
-            -name "*.ipa" \
-            -type f | head -n 1)
+          IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
 
           if [ -z "$IPA" ]; then
             echo "ERRO: IPA não foi criado."
@@ -291,19 +288,20 @@ jobs:
           fi
 
           echo ""
-          echo "========================================"
-          echo "IPA CRIADO COM SUCESSO"
-          echo "========================================"
+          echo "IPA:"
           echo "$IPA"
 
+          echo ""
+          echo "========================================"
+          echo "MotoGo IPA criado com sucesso!"
+          echo "========================================"
+
       # ==========================================
-      # 18. Verificar assinatura
+      # 17. Verificar assinatura
       # ==========================================
       - name: Verificar assinatura do IPA
         run: |
-          IPA=$(find build/ios/ipa \
-            -name "*.ipa" \
-            -type f | head -n 1)
+          IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
 
           mkdir -p "$RUNNER_TEMP/ipa-check"
 
@@ -342,7 +340,7 @@ jobs:
             "$APP" 2>/dev/null || true
 
       # ==========================================
-      # 19. Upload IPA
+      # 18. Upload IPA
       # ==========================================
       - name: Salvar IPA
         uses: actions/upload-artifact@v4
@@ -353,7 +351,7 @@ jobs:
           retention-days: 30
 
       # ==========================================
-      # 20. Upload Archive
+      # 19. Upload Archive
       # ==========================================
       - name: Salvar Archive
         uses: actions/upload-artifact@v4
@@ -364,7 +362,7 @@ jobs:
           retention-days: 30
 
       # ==========================================
-      # 21. Limpar certificado
+      # 20. Limpar keychain
       # ==========================================
       - name: Limpar keychain
         if: always()
