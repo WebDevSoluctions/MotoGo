@@ -44,9 +44,11 @@ jobs:
           sudo gem install cocoapods
           pod --version
 
-      - name: Instalar Pods do iOS
+      - name: Instalar Pods
         working-directory: ios
-        run: pod install --repo-update
+        run: |
+          pod deintegrate || true
+          pod install --repo-update
 
       # ==========================================
       # 5. Certificado Apple Distribution
@@ -70,7 +72,8 @@ jobs:
             -p "github-actions" \
             "$RUNNER_TEMP/build.keychain-db"
 
-          security import "$RUNNER_TEMP/MotoGo_Distribution.p12" \
+          security import \
+            "$RUNNER_TEMP/MotoGo_Distribution.p12" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
@@ -100,7 +103,8 @@ jobs:
           echo "$PROFILE_BASE64" | base64 --decode \
             > "$RUNNER_TEMP/MotoGo_App_Store_2026.mobileprovision"
 
-          cp "$RUNNER_TEMP/MotoGo_App_Store_2026.mobileprovision" \
+          cp \
+            "$RUNNER_TEMP/MotoGo_App_Store_2026.mobileprovision" \
             "$HOME/Library/MobileDevice/Provisioning Profiles/MotoGo_App_Store_2026.mobileprovision"
 
       # ==========================================
@@ -108,10 +112,6 @@ jobs:
       # ==========================================
       - name: Verificar certificado Apple
         run: |
-          echo "========================================"
-          echo "CERTIFICADOS DE ASSINATURA"
-          echo "========================================"
-
           security find-identity \
             -v \
             -p codesigning \
@@ -128,7 +128,7 @@ jobs:
             > "$RUNNER_TEMP/profile.plist"
 
           echo "========================================"
-          echo "PROVISIONING PROFILE"
+          echo "PROFILE"
           echo "========================================"
 
           echo "Nome:"
@@ -146,10 +146,10 @@ jobs:
             -c "Print :Entitlements:application-identifier" \
             "$RUNNER_TEMP/profile.plist"
 
-          echo "Push Notifications:"
+          echo "aps-environment:"
           /usr/libexec/PlistBuddy \
             -c "Print :Entitlements:aps-environment" \
-            "$RUNNER_TEMP/profile.plist" || echo "aps-environment não encontrado"
+            "$RUNNER_TEMP/profile.plist" || true
 
       # ==========================================
       # 9. Limpar Flutter
@@ -160,7 +160,7 @@ jobs:
           flutter pub get
 
       # ==========================================
-      # 10. Atualizar Pods
+      # 10. Reinstalar Pods
       # ==========================================
       - name: Atualizar Pods
         working-directory: ios
@@ -168,16 +168,7 @@ jobs:
           pod install --repo-update
 
       # ==========================================
-      # 11. Build Flutter iOS sem assinatura
-      # ==========================================
-      - name: Build Flutter iOS Release
-        run: |
-          flutter build ios \
-            --release \
-            --no-codesign
-
-      # ==========================================
-      # 12. ExportOptions.plist
+      # 11. Criar ExportOptions.plist
       # ==========================================
       - name: Criar ExportOptions.plist
         run: |
@@ -185,12 +176,14 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
           "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-
           <plist version="1.0">
           <dict>
 
               <key>method</key>
               <string>app-store</string>
+
+              <key>destination</key>
+              <string>export</string>
 
               <key>signingStyle</key>
               <string>manual</string>
@@ -204,14 +197,11 @@ jobs:
                   <string>MotoGo App Store 2026</string>
               </dict>
 
-              <key>destination</key>
-              <string>export</string>
+              <key>stripSwiftSymbols</key>
+              <true/>
 
               <key>compileBitcode</key>
               <false/>
-
-              <key>stripSwiftSymbols</key>
-              <true/>
 
           </dict>
           </plist>
@@ -221,7 +211,42 @@ jobs:
           cat ios/ExportOptions.plist
 
       # ==========================================
-      # 13. Criar Archive
+      # 12. Build Flutter sem assinatura
+      # ==========================================
+      - name: Build Flutter iOS
+        run: |
+          flutter build ios \
+            --release \
+            --no-codesign
+
+      # ==========================================
+      # 13. Configurar assinatura SOMENTE no Runner
+      # ==========================================
+      - name: Configurar assinatura do Runner
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("ios/Runner.xcodeproj/project.pbxproj")
+          text = path.read_text()
+
+          text = text.replace(
+              'CODE_SIGN_STYLE = Automatic;',
+              'CODE_SIGN_STYLE = Manual;'
+          )
+
+          text = text.replace(
+              'DEVELOPMENT_TEAM = "";',
+              'DEVELOPMENT_TEAM = 837DURTJ6M;'
+          )
+
+          path.write_text(text)
+
+          print("Configuração do Runner preparada.")
+          PY
+
+      # ==========================================
+      # 14. Criar Archive
       # ==========================================
       - name: Criar Archive iOS
         run: |
@@ -234,11 +259,11 @@ jobs:
             -sdk iphoneos \
             -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
             DEVELOPMENT_TEAM=837DURTJ6M \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_STYLE=Manual \
             archive
 
       # ==========================================
-      # 14. Verificar Archive
+      # 15. Verificar Archive
       # ==========================================
       - name: Verificar Archive
         run: |
@@ -247,14 +272,10 @@ jobs:
             exit 1
           fi
 
-          echo "========================================"
-          echo "ARCHIVE CRIADO COM SUCESSO"
-          echo "========================================"
-
-          ls -lah build/ios/archive/
+          echo "Archive criado com sucesso."
 
       # ==========================================
-      # 15. Exportar IPA
+      # 16. Exportar IPA
       # ==========================================
       - name: Exportar IPA
         run: |
@@ -267,12 +288,12 @@ jobs:
             -exportOptionsPlist ios/ExportOptions.plist
 
       # ==========================================
-      # 16. Verificar IPA
+      # 17. Verificar IPA
       # ==========================================
       - name: Verificar IPA
         run: |
           echo "========================================"
-          echo "ARQUIVOS GERADOS"
+          echo "Arquivos gerados"
           echo "========================================"
 
           find build/ios/ipa \
@@ -288,16 +309,13 @@ jobs:
           fi
 
           echo ""
-          echo "IPA:"
+          echo "========================================"
+          echo "MotoGo IPA criado!"
+          echo "========================================"
           echo "$IPA"
 
-          echo ""
-          echo "========================================"
-          echo "MotoGo IPA criado com sucesso!"
-          echo "========================================"
-
       # ==========================================
-      # 17. Verificar assinatura
+      # 18. Verificar assinatura
       # ==========================================
       - name: Verificar assinatura do IPA
         run: |
@@ -313,15 +331,12 @@ jobs:
             -name "*.app" \
             -type d | head -n 1)
 
-          echo "========================================"
-          echo "APLICATIVO"
-          echo "========================================"
-
+          echo "Aplicativo:"
           echo "$APP"
 
           echo ""
           echo "========================================"
-          echo "ASSINATURA"
+          echo "Assinatura"
           echo "========================================"
 
           codesign \
@@ -329,18 +344,8 @@ jobs:
             --verbose=4 \
             "$APP" 2>&1 || true
 
-          echo ""
-          echo "========================================"
-          echo "ENTITLEMENTS"
-          echo "========================================"
-
-          codesign \
-            -d \
-            --entitlements :- \
-            "$APP" 2>/dev/null || true
-
       # ==========================================
-      # 18. Upload IPA
+      # 19. Upload IPA
       # ==========================================
       - name: Salvar IPA
         uses: actions/upload-artifact@v4
@@ -351,7 +356,7 @@ jobs:
           retention-days: 30
 
       # ==========================================
-      # 19. Upload Archive
+      # 20. Upload Archive
       # ==========================================
       - name: Salvar Archive
         uses: actions/upload-artifact@v4
@@ -362,7 +367,7 @@ jobs:
           retention-days: 30
 
       # ==========================================
-      # 20. Limpar keychain
+      # 21. Limpar certificados
       # ==========================================
       - name: Limpar keychain
         if: always()
