@@ -1,4 +1,4 @@
-name: MotoGo iOS Build
+name: MotoGo iOS Release
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
       - name: Verificar Flutter
         run: flutter --version
 
-      - name: Instalar dependências Flutter
+      - name: Instalar dependências
         run: flutter pub get
 
       - name: Instalar CocoaPods
@@ -31,31 +31,26 @@ jobs:
           sudo gem install cocoapods
           pod --version
 
-      - name: Instalar pods do iOS
+      - name: Instalar Pods
         working-directory: ios
         run: pod install --repo-update
 
-      - name: Verificar projeto
-        run: flutter doctor -v
-
-      - name: Build iOS Simulator
+      - name: Verificar Bundle ID
         run: |
-          flutter build ios --simulator --debug
+          grep -n "PRODUCT_BUNDLE_IDENTIFIER" ios/Runner.xcodeproj/project.pbxproj
 
-      - name: Verificar aplicativo
+      - name: Build iOS
+        run: flutter build ios --release --no-codesign
+
+      - name: Criar Payload
         run: |
-          if [ ! -d "build/ios/iphonesimulator/Runner.app" ]; then
-            echo "ERRO: Runner.app não foi encontrado."
-            exit 1
-          fi
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+          zip -r MotoGo-iOS.ipa Payload
 
-          echo "========================================"
-          echo "MotoGo iOS Simulator build criado!"
-          echo "========================================"
-
-      - name: Salvar aplicativo iOS
+      - name: Salvar IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MotoGo-iOS-Simulator
-          path: build/ios/iphonesimulator/Runner.app
+          name: MotoGo-iOS
+          path: MotoGo-iOS.ipa
           if-no-files-found: error
