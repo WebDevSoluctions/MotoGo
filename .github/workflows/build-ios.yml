@@ -1,4 +1,4 @@
-name: MotoGo iOS App Store Build
+name: MotoGo iOS Build
 
 on:
   workflow_dispatch:
@@ -8,12 +8,19 @@ on:
 
 jobs:
   build-ios:
+    name: Build MotoGo iOS IPA
     runs-on: macos-latest
 
     steps:
+      # ==========================================
+      # 1. Baixar projeto
+      # ==========================================
       - name: Checkout do projeto
         uses: actions/checkout@v4
 
+      # ==========================================
+      # 2. Configurar Flutter
+      # ==========================================
       - name: Configurar Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -23,6 +30,9 @@ jobs:
       - name: Verificar Flutter
         run: flutter --version
 
+      # ==========================================
+      # 3. Dependências
+      # ==========================================
       - name: Instalar dependências Flutter
         run: flutter pub get
 
@@ -36,107 +46,135 @@ jobs:
         run: pod install --repo-update
 
       # ==========================================
-      # CERTIFICADO APPLE
+      # 4. Criar certificado P12
       # ==========================================
-
-      - name: Criar certificado P12
+      - name: Preparar certificado Apple
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
         run: |
-          echo "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/MotoGo_Distribution.p12"
+          set -e
+
+          echo "$CERTIFICATE_BASE64" | base64 --decode > distribution.p12
 
           security create-keychain \
-            -p "github-actions" \
-            "$RUNNER_TEMP/build.keychain-db"
+            -p "$CERTIFICATE_PASSWORD" \
+            build.keychain-db
 
-          security default-keychain \
-            -s "$RUNNER_TEMP/build.keychain-db"
+          security set-keychain-settings \
+            -lut 21600 \
+            build.keychain-db
 
           security unlock-keychain \
-            -p "github-actions" \
-            "$RUNNER_TEMP/build.keychain-db"
+            -p "$CERTIFICATE_PASSWORD" \
+            build.keychain-db
 
-          security import "$RUNNER_TEMP/MotoGo_Distribution.p12" \
+          security import distribution.p12 \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
             -f pkcs12 \
-            "$RUNNER_TEMP/build.keychain-db"
+            -k build.keychain-db
 
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "github-actions" \
-            "$RUNNER_TEMP/build.keychain-db"
+          security list-keychains \
+            -d user \
+            -s build.keychain-db login.keychain-db
+
+          security default-keychain \
+            -s build.keychain-db
+
+          security unlock-keychain \
+            -p "$CERTIFICATE_PASSWORD" \
+            build.keychain-db
+
+          echo "Certificado instalado."
+
+          security find-identity \
+            -v \
+            -p codesigning \
+            build.keychain-db
 
       # ==========================================
-      # PROVISIONING PROFILE
+      # 5. Instalar Provisioning Profile
       # ==========================================
-
       - name: Instalar Provisioning Profile
         env:
           PROFILE_BASE64: ${{ secrets.APPSTORE_PROVISIONING_PROFILE_BASE64 }}
         run: |
+          set -e
+
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
-          echo "$PROFILE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision"
-
-          security cms -D \
-            -i "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
-            > "$RUNNER_TEMP/profile.plist"
+          echo "$PROFILE_BASE64" | base64 --decode > profile.mobileprovision
 
           PROFILE_UUID=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :UUID" \
-            "$RUNNER_TEMP/profile.plist"
+            security cms -D -i profile.mobileprovision |
+            plutil -extract UUID raw -
           )
 
           PROFILE_NAME=$(
-            /usr/libexec/PlistBuddy \
-            -c "Print :Name" \
-            "$RUNNER_TEMP/profile.plist"
+            security cms -D -i profile.mobileprovision |
+            plutil -extract Name raw -
           )
 
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
-          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "Profile:"
+          echo "Nome: $PROFILE_NAME"
+          echo "UUID: $PROFILE_UUID"
 
-          cp "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
+          cp profile.mobileprovision \
             "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
 
-          echo "Provisioning Profile:"
-          echo "Name: $PROFILE_NAME"
-          echo "UUID: $PROFILE_UUID"
+          echo "Provisioning Profile instalado."
 
       # ==========================================
-      # VERIFICAÇÕES
+      # 6. Verificar assinatura
       # ==========================================
-
       - name: Verificar assinatura Apple
         run: |
-          security find-identity \
-            -v \
-            -p codesigning \
-            "$RUNNER_TEMP/build.keychain-db"
+          echo "Identidades disponíveis:"
+          security find-identity -v -p codesigning build.keychain-db
 
-      - name: Verificar Bundle ID
-        run: |
-          grep -n "PRODUCT_BUNDLE_IDENTIFIER" \
-            ios/Runner.xcodeproj/project.pbxproj
-
-      - name: Verificar Provisioning Profile
-        run: |
-          echo "Profile: $PROFILE_NAME"
-          echo "UUID: $PROFILE_UUID"
+          echo ""
+          echo "Provisioning Profiles:"
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles"
 
       # ==========================================
-      # EXPORT OPTIONS
+      # 7. Gerar arquivos Flutter
       # ==========================================
+      - name: Preparar projeto iOS
+        run: |
+          flutter clean
+          flutter pub get
 
+          flutter build ios \
+            --release \
+            --no-codesign
+
+      # ==========================================
+      # 8. Criar Archive assinado
+      # ==========================================
+      - name: Build iOS Archive
+        run: |
+          set -e
+
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath "$PWD/build/ios/MotoGo.xcarchive" \
+            -destination "generic/platform=iOS" \
+            DEVELOPMENT_TEAM=837DURTJ6M \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="MotoGo App Store" \
+            archive
+
+      # ==========================================
+      # 9. Exportar IPA
+      # ==========================================
       - name: Criar ExportOptions.plist
         run: |
-          cat > ios/ExportOptions.plist <<EOF
+          cat > ExportOptions.plist <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
           "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -154,66 +192,82 @@ jobs:
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.webdevsolutions.motogo</key>
-                  <string>$PROFILE_NAME</string>
+                  <string>MotoGo App Store</string>
               </dict>
-
-              <key>stripSwiftSymbols</key>
-              <true/>
-
-              <key>uploadSymbols</key>
-              <true/>
 
               <key>compileBitcode</key>
               <false/>
+
+              <key>destination</key>
+              <string>export</string>
           </dict>
           </plist>
           EOF
 
-      # ==========================================
-      # BUILD IPA
-      # ==========================================
-
-      - name: Build iOS IPA
+      - name: Exportar IPA
         run: |
-          flutter build ipa \
-            --release \
-            --export-options-plist=ios/ExportOptions.plist
+          set -e
+
+          mkdir -p build/ios/ipa
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$PWD/build/ios/MotoGo.xcarchive" \
+            -exportPath "$PWD/build/ios/ipa" \
+            -exportOptionsPlist "$PWD/ExportOptions.plist"
 
       # ==========================================
-      # VERIFICAR IPA
+      # 10. Verificar IPA
       # ==========================================
-
       - name: Verificar IPA
         run: |
           echo "========================================"
-          echo "MotoGo IPA criado com sucesso!"
+          echo "Arquivos gerados:"
           echo "========================================"
 
-          ls -lh build/ios/ipa/
+          find build/ios -type f \
+            \( -name "*.ipa" -o -name "*.xcarchive" \) \
+            -print
 
-          if [ ! -f build/ios/ipa/*.ipa ]; then
-            echo "ERRO: IPA não encontrado."
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -n 1)
+
+          if [ -z "$IPA" ]; then
+            echo "ERRO: IPA não foi criado."
             exit 1
           fi
 
-      # ==========================================
-      # SALVAR IPA
-      # ==========================================
+          echo ""
+          echo "========================================"
+          echo "MotoGo IPA criado com sucesso!"
+          echo "========================================"
+          echo "IPA: $IPA"
 
+      # ==========================================
+      # 11. Salvar IPA no GitHub Actions
+      # ==========================================
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MotoGo-iOS-AppStore
+          name: MotoGo-iOS-IPA
           path: build/ios/ipa/*.ipa
           if-no-files-found: error
 
       # ==========================================
-      # LIMPEZA
+      # 12. Salvar Archive
       # ==========================================
+      - name: Upload Xcode Archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotoGo-iOS-Archive
+          path: build/ios/MotoGo.xcarchive
+          if-no-files-found: error
 
-      - name: Limpar chave temporária
+      # ==========================================
+      # 13. Limpar certificado
+      # ==========================================
+      - name: Limpar chave de assinatura
         if: always()
         run: |
-          security delete-keychain \
-            "$RUNNER_TEMP/build.keychain-db" \
-            || true
+          security delete-keychain build.keychain-db || true
+          rm -f distribution.p12
+          rm -f profile.mobileprovision
