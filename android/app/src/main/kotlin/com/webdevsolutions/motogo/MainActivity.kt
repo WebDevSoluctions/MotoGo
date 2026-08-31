@@ -1,4 +1,4 @@
-package com.example.motogo
+package com.webdevsolutions.motogo
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -4,35 +4,54 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    namespace = "com.example.motogo"
+    namespace = "com.webdevsolutions.motogo"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-
-        // Necessário para flutter_local_notifications
         isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
-        applicationId = "com.example.motogo"
+        applicationId = "com.webdevsolutions.motogo"
 
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Necessário para algumas configurações de notificações
         multiDexEnabled = true
+    }
+
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storePassword = keystoreProperties["storePassword"] as String
+
+            // A chave está na pasta android/
+            storeFile = rootProject.file(
+                keystoreProperties["storeFile"] as String
+            )
+        }
     }
 
     buildTypes {
         release {
-            // Mantém a configuração atual para testes
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
@@ -44,7 +63,6 @@ kotlin {
 }
 
 dependencies {
-    // Necessário para flutter_local_notifications
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
