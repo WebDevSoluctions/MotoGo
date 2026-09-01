@@ -17,13 +17,13 @@ jobs:
     steps:
 
       # =========================================================
-      # 1. Checkout
+      # 1. CHECKOUT
       # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
       # =========================================================
-      # 2. Flutter
+      # 2. FLUTTER
       # =========================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -35,25 +35,21 @@ jobs:
         run: flutter --version
 
       # =========================================================
-      # 3. Dependências
+      # 3. DEPENDÊNCIAS
       # =========================================================
       - name: Flutter pub get
         run: flutter pub get
 
       # =========================================================
-      # 4. CocoaPods
+      # 4. COCOAPODS
       # =========================================================
       - name: Install CocoaPods
         run: |
           sudo gem install cocoapods
           pod --version
 
-      - name: Install Pods
-        working-directory: ios
-        run: pod install --repo-update
-
       # =========================================================
-      # 5. Criar Keychain
+      # 5. CRIAR KEYCHAIN
       # =========================================================
       - name: Create signing keychain
         env:
@@ -62,51 +58,65 @@ jobs:
         run: |
           set -e
 
-          echo "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/MotoGo_Distribution.p12"
+          CERT_PATH="$RUNNER_TEMP/MotoGo_Distribution.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="github-actions"
+
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
 
           security create-keychain \
-            -p "github-actions" \
-            "$RUNNER_TEMP/build.keychain-db"
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
 
           security set-keychain-settings \
             -lut 21600 \
-            "$RUNNER_TEMP/build.keychain-db"
+            "$KEYCHAIN_PATH"
 
           security unlock-keychain \
-            -p "github-actions" \
-            "$RUNNER_TEMP/build.keychain-db"
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
 
           security import \
-            "$RUNNER_TEMP/MotoGo_Distribution.p12" \
+            "$CERT_PATH" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
             -f pkcs12 \
-            -k "$RUNNER_TEMP/build.keychain-db"
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
 
           security list-keychains \
             -d user \
-            -s "$RUNNER_TEMP/build.keychain-db"
+            -s "$KEYCHAIN_PATH"
 
           security default-keychain \
-            -s "$RUNNER_TEMP/build.keychain-db"
+            -s "$KEYCHAIN_PATH"
 
           security unlock-keychain \
-            -p "github-actions" \
-            "$RUNNER_TEMP/build.keychain-db"
+            -p "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          echo "Keychain configurado."
 
       # =========================================================
-      # 6. Verificar certificado
+      # 6. VERIFICAR CERTIFICADO
       # =========================================================
       - name: Verify Apple Distribution certificate
         run: |
+          set -e
+
           security find-identity \
             -v \
             -p codesigning \
             "$RUNNER_TEMP/build.keychain-db"
 
       # =========================================================
-      # 7. Instalar Provisioning Profile
+      # 7. INSTALAR PROVISIONING PROFILE
       # =========================================================
       - name: Install provisioning profile
         env:
@@ -115,78 +125,76 @@ jobs:
           set -e
 
           PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_PATH="$RUNNER_TEMP/MotoGo_App_Store.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
 
           mkdir -p "$PROFILE_DIR"
 
-          echo "$PROFILE_BASE64" | base64 --decode \
-            > "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision"
-
-          cp \
-            "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
-            "$PROFILE_DIR/MotoGo_App_Store.mobileprovision"
-
-      # =========================================================
-      # 8. Ler dados do Provisioning Profile
-      # =========================================================
-      - name: Read provisioning profile
-        run: |
-          set -e
+          echo "$PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
 
           security cms \
             -D \
-            -i "$RUNNER_TEMP/MotoGo_App_Store.mobileprovision" \
-            > "$RUNNER_TEMP/profile.plist"
+            -i "$PROFILE_PATH" \
+            > "$PROFILE_PLIST"
 
           PROFILE_NAME=$(
             /usr/libexec/PlistBuddy \
-            -c "Print :Name" \
-            "$RUNNER_TEMP/profile.plist"
+              -c "Print :Name" \
+              "$PROFILE_PLIST"
           )
 
           PROFILE_UUID=$(
             /usr/libexec/PlistBuddy \
-            -c "Print :UUID" \
-            "$RUNNER_TEMP/profile.plist"
+              -c "Print :UUID" \
+              "$PROFILE_PLIST"
           )
 
           PROFILE_TEAM=$(
             /usr/libexec/PlistBuddy \
-            -c "Print :TeamIdentifier:0" \
-            "$RUNNER_TEMP/profile.plist"
+              -c "Print :TeamIdentifier:0" \
+              "$PROFILE_PLIST"
           )
 
           PROFILE_APP_ID=$(
             /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:application-identifier" \
-            "$RUNNER_TEMP/profile.plist"
+              -c "Print :Entitlements:application-identifier" \
+              "$PROFILE_PLIST"
           )
 
-          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
-
-          echo "========================================"
-          echo "Provisioning Profile"
-          echo "========================================"
+          echo "=========================================="
+          echo "PROVISIONING PROFILE"
+          echo "=========================================="
           echo "Name: $PROFILE_NAME"
           echo "UUID: $PROFILE_UUID"
           echo "Team: $PROFILE_TEAM"
           echo "App ID: $PROFILE_APP_ID"
-          echo "========================================"
+          echo "=========================================="
 
           if [ "$PROFILE_TEAM" != "$APPLE_TEAM_ID" ]; then
-            echo "ERRO: Team ID do profile não corresponde."
+            echo "ERRO: Team ID incorreto."
+            echo "Esperado: $APPLE_TEAM_ID"
+            echo "Encontrado: $PROFILE_TEAM"
             exit 1
           fi
 
           if [ "$PROFILE_APP_ID" != "$APPLE_TEAM_ID.$APPLE_BUNDLE_ID" ]; then
-            echo "ERRO: Bundle ID do provisioning profile não corresponde."
+            echo "ERRO: Bundle ID incorreto."
             echo "Esperado: $APPLE_TEAM_ID.$APPLE_BUNDLE_ID"
             echo "Encontrado: $PROFILE_APP_ID"
             exit 1
           fi
 
+          cp \
+            "$PROFILE_PATH" \
+            "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+          echo "Provisioning Profile instalado."
+
       # =========================================================
-      # 9. Flutter clean
+      # 8. LIMPAR FLUTTER
       # =========================================================
       - name: Flutter clean
         run: |
@@ -194,22 +202,290 @@ jobs:
           flutter pub get
 
       # =========================================================
-      # 10. Garantir Pods instalados
+      # 9. LIMPAR E REINSTALAR PODS
       # =========================================================
-      - name: Reinstall Pods
-        working-directory: ios
+      - name: Reinstall iOS Pods
         run: |
+          set -e
+
+          rm -rf ios/Pods
+          rm -rf ios/.symlinks
+          rm -rf ios/Flutter/ephemeral
+
+          flutter pub get
+
+          cd ios
           pod install --repo-update
+          cd ..
 
       # =========================================================
-      # 11. Criar ExportOptions.plist
+      # 10. CONFIGURAR ASSINATURA SOMENTE NO RUNNER
+      # =========================================================
+      - name: Configure Runner signing
+        run: |
+          set -e
+
+          PROJECT="ios/Runner.xcodeproj/project.pbxproj"
+
+          echo "=========================================="
+          echo "CONFIGURANDO ASSINATURA DO RUNNER"
+          echo "=========================================="
+
+          python3 - "$PROJECT" "$PROFILE_UUID" "$APPLE_TEAM_ID" <<'PY'
+          import sys
+          import re
+          from pathlib import Path
+
+          project_path = Path(sys.argv[1])
+          profile_uuid = sys.argv[2]
+          team_id = sys.argv[3]
+
+          text = project_path.read_text()
+
+          # ---------------------------------------------------------
+          # Encontrar o target Runner
+          # ---------------------------------------------------------
+          runner_target = re.search(
+              r'97C146ED1CF9000F007C117D\s*/\* Runner \*/\s*=\s*\{(.*?)\n\s*\};',
+              text,
+              re.S
+          )
+
+          if not runner_target:
+              raise SystemExit("ERRO: target Runner não encontrado.")
+
+          runner_block = runner_target.group(1)
+
+          config_list_match = re.search(
+              r'buildConfigurationList\s*=\s*([A-F0-9]+)\s*/\* Build configuration list for PBXNativeTarget "Runner"',
+              runner_block
+          )
+
+          if not config_list_match:
+              raise SystemExit(
+                  "ERRO: Build configuration list do Runner não encontrada."
+              )
+
+          config_list_id = config_list_match.group(1)
+
+          # ---------------------------------------------------------
+          # Encontrar a lista de configurações do Runner
+          # ---------------------------------------------------------
+          config_list_pattern = (
+              rf'{re.escape(config_list_id)}\s*/\* Build configuration list '
+              rf'for PBXNativeTarget "Runner" \*/\s*=\s*\{{(.*?)\n\s*\}};'
+          )
+
+          config_list_match = re.search(
+              config_list_pattern,
+              text,
+              re.S
+          )
+
+          if not config_list_match:
+              raise SystemExit(
+                  "ERRO: configuração do Runner não encontrada."
+              )
+
+          config_list_block = config_list_match.group(1)
+
+          release_match = re.search(
+              r'([A-F0-9]+)\s*/\* Release \*/',
+              config_list_block
+          )
+
+          if not release_match:
+              raise SystemExit(
+                  "ERRO: configuração Release do Runner não encontrada."
+              )
+
+          release_id = release_match.group(1)
+
+          # ---------------------------------------------------------
+          # Encontrar configuração Release
+          # ---------------------------------------------------------
+          release_pattern = (
+              rf'{re.escape(release_id)}\s*/\* Release \*/\s*=\s*\{{'
+              rf'(.*?)\n\s*\}};'
+          )
+
+          release_match = re.search(
+              release_pattern,
+              text,
+              re.S
+          )
+
+          if not release_match:
+              raise SystemExit(
+                  "ERRO: bloco Release do Runner não encontrado."
+              )
+
+          release_block = release_match.group(1)
+
+          # ---------------------------------------------------------
+          # Remover configurações antigas do Runner
+          # ---------------------------------------------------------
+          release_block = re.sub(
+              r'^\s*CODE_SIGN_STYLE\s*=.*?;\s*$',
+              '',
+              release_block,
+              flags=re.M
+          )
+
+          release_block = re.sub(
+              r'^\s*CODE_SIGN_IDENTITY\s*=.*?;\s*$',
+              '',
+              release_block,
+              flags=re.M
+          )
+
+          release_block = re.sub(
+              r'^\s*DEVELOPMENT_TEAM\s*=.*?;\s*$',
+              '',
+              release_block,
+              flags=re.M
+          )
+
+          release_block = re.sub(
+              r'^\s*PROVISIONING_PROFILE_SPECIFIER\s*=.*?;\s*$',
+              '',
+              release_block,
+              flags=re.M
+          )
+
+          # ---------------------------------------------------------
+          # Adicionar assinatura MANUAL somente ao Runner Release
+          # ---------------------------------------------------------
+          signing = f'''
+                                  CODE_SIGN_STYLE = Manual;
+                                  CODE_SIGN_IDENTITY = "Apple Distribution";
+                                  DEVELOPMENT_TEAM = {team_id};
+                                  PROVISIONING_PROFILE_SPECIFIER = {profile_uuid};
+          '''
+
+          release_block = signing + release_block
+
+          # ---------------------------------------------------------
+          # Substituir somente o bloco Release encontrado
+          # ---------------------------------------------------------
+          start, end = release_match.span(1)
+
+          text = (
+              text[:start]
+              + release_block
+              + text[end:]
+          )
+
+          project_path.write_text(text)
+
+          print("Runner Release configurado.")
+          print(f"Team: {team_id}")
+          print(f"Profile UUID: {profile_uuid}")
+          print("Signing: Manual")
+          print("Certificate: Apple Distribution")
+          PY
+
+          echo ""
+          echo "=========================================="
+          echo "CONFIGURAÇÃO DO XCODE"
+          echo "=========================================="
+
+          grep -n \
+            -E \
+            "CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|PRODUCT_BUNDLE_IDENTIFIER" \
+            "$PROJECT" || true
+
+      # =========================================================
+      # 11. CONFIGURAR PODS SEM ASSINATURA
+      # =========================================================
+      - name: Disable signing for Pods
+        run: |
+          set -e
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("ios/Podfile")
+          text = path.read_text()
+
+          marker = "config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'"
+
+          if marker not in text:
+
+              if not text.rstrip().endswith("end"):
+                  raise SystemExit(
+                      "ERRO: Podfile possui estrutura inesperada."
+                  )
+
+              old = text.rstrip()
+
+              new = old + """
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                config.build_settings['PROVISIONING_PROFILE_SPECIFIER'] = ''
+                config.build_settings['DEVELOPMENT_TEAM'] = ''
+              end
+            end
+          end
+          """
+
+              path.write_text(new)
+
+          print("Podfile configurado para não assinar Pods.")
+          PY
+
+          cd ios
+          pod install
+          cd ..
+
+      # =========================================================
+      # 12. BUILD FLUTTER SEM ASSINATURA
+      # =========================================================
+      - name: Flutter iOS Release no-code-sign
+        run: |
+          set -e
+
+          flutter build ios \
+            --release \
+            --no-codesign
+
+      # =========================================================
+      # 13. VERIFICAR CONFIGURAÇÃO FINAL DO XCODE
+      # =========================================================
+      - name: Verify Xcode signing configuration
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "XCODE BUILD SETTINGS"
+          echo "=========================================="
+
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -showBuildSettings \
+            | grep -E \
+              "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER" \
+              || true
+
+      # =========================================================
+      # 14. CRIAR EXPORTOPTIONS
       # =========================================================
       - name: Create ExportOptions.plist
         run: |
+          set -e
+
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
           "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+
           <plist version="1.0">
           <dict>
 
@@ -244,33 +520,25 @@ jobs:
           </plist>
           EOF
 
-          echo "========================================"
+          echo "=========================================="
           echo "ExportOptions.plist"
-          echo "========================================"
+          echo "=========================================="
 
           cat ios/ExportOptions.plist
 
       # =========================================================
-      # 12. Verificar projeto Xcode
-      # =========================================================
-      - name: Check Xcode project
-        run: |
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -showBuildSettings \
-            | grep -E \
-              "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" \
-              || true
-
-      # =========================================================
-      # 13. Criar Archive
+      # 15. ARCHIVE
       # =========================================================
       - name: Archive iOS App
         run: |
+          set -e
           set -o pipefail
 
           mkdir -p build/ios/archive
+
+          echo "=========================================="
+          echo "CRIANDO ARCHIVE"
+          echo "=========================================="
 
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
@@ -278,16 +546,11 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER="$APPLE_BUNDLE_ID" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
             archive \
             | tee "$RUNNER_TEMP/xcodebuild-archive.log"
 
       # =========================================================
-      # 14. Verificar Archive
+      # 16. VERIFICAR ARCHIVE
       # =========================================================
       - name: Verify Archive
         run: |
@@ -300,17 +563,24 @@ jobs:
             exit 1
           fi
 
-          echo "Archive criado:"
+          echo "=========================================="
+          echo "ARCHIVE CRIADO COM SUCESSO"
+          echo "=========================================="
+
           ls -lah "$ARCHIVE"
 
       # =========================================================
-      # 15. Exportar IPA
+      # 17. EXPORTAR IPA
       # =========================================================
       - name: Export IPA
         run: |
           set -e
 
           mkdir -p build/ios/ipa
+
+          echo "=========================================="
+          echo "EXPORTANDO IPA"
+          echo "=========================================="
 
           xcodebuild \
             -exportArchive \
@@ -319,15 +589,15 @@ jobs:
             -exportOptionsPlist "$GITHUB_WORKSPACE/ios/ExportOptions.plist"
 
       # =========================================================
-      # 16. Verificar IPA
+      # 18. VERIFICAR IPA
       # =========================================================
       - name: Verify IPA
         run: |
           set -e
 
-          echo "========================================"
-          echo "Arquivos gerados"
-          echo "========================================"
+          echo "=========================================="
+          echo "ARQUIVOS GERADOS"
+          echo "=========================================="
 
           find build/ios/ipa \
             -maxdepth 2 \
@@ -346,7 +616,7 @@ jobs:
           echo "$IPA"
 
       # =========================================================
-      # 17. Verificar assinatura
+      # 19. VERIFICAR ASSINATURA
       # =========================================================
       - name: Verify IPA signature
         run: |
@@ -365,16 +635,21 @@ jobs:
             -type d \
             | head -n 1)
 
-          echo "========================================"
-          echo "Aplicativo"
-          echo "========================================"
+          if [ -z "$APP" ]; then
+            echo "ERRO: APP não encontrado dentro do IPA."
+            exit 1
+          fi
+
+          echo "=========================================="
+          echo "APP"
+          echo "=========================================="
 
           echo "$APP"
 
           echo ""
-          echo "========================================"
-          echo "Assinatura"
-          echo "========================================"
+          echo "=========================================="
+          echo "ASSINATURA"
+          echo "=========================================="
 
           codesign \
             -dv \
@@ -383,19 +658,18 @@ jobs:
             2>&1
 
           echo ""
-          echo "========================================"
-          echo "Entitlements"
-          echo "========================================"
+          echo "=========================================="
+          echo "ENTITLEMENTS"
+          echo "=========================================="
 
           codesign \
             -d \
             --entitlements :- \
             "$APP" \
-            2>/dev/null \
-            || true
+            2>/dev/null || true
 
       # =========================================================
-      # 18. Validar Bundle ID
+      # 20. VALIDAR BUNDLE ID
       # =========================================================
       - name: Verify Bundle ID
         run: |
@@ -416,8 +690,8 @@ jobs:
 
           BUNDLE_ID=$(
             /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            "$APP/Info.plist"
+              -c "Print :CFBundleIdentifier" \
+              "$APP/Info.plist"
           )
 
           echo "Bundle ID: $BUNDLE_ID"
@@ -427,8 +701,10 @@ jobs:
             exit 1
           fi
 
+          echo "Bundle ID correto."
+
       # =========================================================
-      # 19. Upload IPA
+      # 21. UPLOAD IPA
       # =========================================================
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -439,7 +715,7 @@ jobs:
           retention-days: 30
 
       # =========================================================
-      # 20. Upload Archive
+      # 22. UPLOAD ARCHIVE
       # =========================================================
       - name: Upload Archive
         uses: actions/upload-artifact@v4
@@ -450,7 +726,7 @@ jobs:
           retention-days: 30
 
       # =========================================================
-      # 21. Limpar Keychain
+      # 23. LIMPAR KEYCHAIN
       # =========================================================
       - name: Cleanup signing keychain
         if: always()
