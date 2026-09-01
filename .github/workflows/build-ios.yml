@@ -250,8 +250,8 @@ jobs:
           pod install
           cd ..
 
-      # =========================================================
-      # 11. CONFIGURAR ASSINATURA SOMENTE DO RUNNER RELEASE
+            # =========================================================
+      # 11. CONFIGURAR ASSINATURA DO RUNNER
       # =========================================================
       - name: Configure Runner Release signing
         run: |
@@ -260,7 +260,7 @@ jobs:
           PROJECT="ios/Runner.xcodeproj/project.pbxproj"
 
           echo "=========================================="
-          echo "CONFIGURANDO RUNNER RELEASE"
+          echo "CONFIGURANDO ASSINATURA DO RUNNER"
           echo "=========================================="
 
           python3 - "$PROJECT" "$PROFILE_UUID" "$APPLE_TEAM_ID" <<'PY'
@@ -274,79 +274,94 @@ jobs:
 
           text = project_path.read_text()
 
-          # ID EXATO DA CONFIGURACAO RELEASE DO TARGET RUNNER
-          config_id = "97C147071CF9000F007C117D"
-
-          pattern = (
-              rf'({re.escape(config_id)}\s*/\*\s*Release\s*\*/\s*=\s*\{{)'
-              rf'(.*?)'
-              rf'(\n\s*\}};)'
+          # Encontrar a configuracao Release do TARGET Runner.
+          # Ela deve conter PRODUCT_BUNDLE_IDENTIFIER = com.webdevsolutions.motogo
+          blocks = re.finditer(
+              r'([A-F0-9]{24}) /\* Release \*/ = \{(.*?)\n\s*\};',
+              text,
+              re.S
           )
 
-          match = re.search(pattern, text, re.S)
+          found = False
 
-          if not match:
-              raise SystemExit(
-                  "ERRO: configuracao Release do target Runner nao encontrada."
-              )
+          for match in blocks:
+              block = match.group(2)
 
-          header = match.group(1)
-          body = match.group(2)
-          footer = match.group(3)
+              if "PRODUCT_BUNDLE_IDENTIFIER = com.webdevsolutions.motogo;" not in block:
+                  continue
 
-          # Remover configuracoes antigas SOMENTE deste bloco
-          keys = [
-              "CODE_SIGN_STYLE",
-              "CODE_SIGN_IDENTITY",
-              "DEVELOPMENT_TEAM",
-              "PROVISIONING_PROFILE_SPECIFIER",
-              "CODE_SIGNING_ALLOWED",
-              "CODE_SIGNING_REQUIRED",
-          ]
+              start = match.start(2)
+              end = match.end(2)
 
-          for key in keys:
-              body = re.sub(
-                  rf'^\s*{re.escape(key)}(?:\[.*?\])?\s*=.*?;\s*$',
+              new_block = block
+
+              # Remover configurações de assinatura existentes
+              new_block = re.sub(
+                  r'^\s*CODE_SIGN_STYLE\s*=.*?;\s*$',
                   '',
-                  body,
+                  new_block,
                   flags=re.M
               )
 
-          signing = f'''
+              new_block = re.sub(
+                  r'^\s*CODE_SIGN_IDENTITY(?:\[.*?\])?\s*=.*?;\s*$',
+                  '',
+                  new_block,
+                  flags=re.M
+              )
+
+              new_block = re.sub(
+                  r'^\s*DEVELOPMENT_TEAM\s*=.*?;\s*$',
+                  '',
+                  new_block,
+                  flags=re.M
+              )
+
+              new_block = re.sub(
+                  r'^\s*PROVISIONING_PROFILE_SPECIFIER\s*=.*?;\s*$',
+                  '',
+                  new_block,
+                  flags=re.M
+              )
+
+              signing = f"""
                                   CODE_SIGN_STYLE = Manual;
                                   CODE_SIGN_IDENTITY = "Apple Distribution";
                                   DEVELOPMENT_TEAM = {team_id};
                                   PROVISIONING_PROFILE_SPECIFIER = "{profile_uuid}";
-                                  CODE_SIGNING_ALLOWED = YES;
-                                  CODE_SIGNING_REQUIRED = YES;'''
+              """
 
-          body = signing + body
+              new_block = signing + new_block
 
-          text = (
-              text[:match.start()]
-              + header
-              + body
-              + footer
-              + text[match.end():]
-          )
+              text = text[:start] + new_block + text[end:]
+
+              found = True
+              break
+
+          if not found:
+              raise SystemExit(
+                  "ERRO: configuracao Release do Runner nao encontrada."
+              )
 
           project_path.write_text(text)
 
-          print("Runner Release configurado.")
-          print(f"Team ID: {team_id}")
-          print(f"Profile UUID: {profile_uuid}")
-          print("Signing Style: Manual")
-          print("Certificate: Apple Distribution")
+          print("==========================================")
+          print("ASSINATURA CONFIGURADA")
+          print("==========================================")
+          print(f"DEVELOPMENT_TEAM = {team_id}")
+          print(f"PROVISIONING_PROFILE_SPECIFIER = {profile_uuid}")
+          print("CODE_SIGN_STYLE = Manual")
+          print('CODE_SIGN_IDENTITY = "Apple Distribution"')
           PY
 
           echo ""
           echo "=========================================="
-          echo "CONFIGURACAO FINAL DO RUNNER"
+          echo "VERIFICANDO PROJECT.PBXPROJ"
           echo "=========================================="
 
           grep -n \
             -E \
-            "CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER|PRODUCT_BUNDLE_IDENTIFIER" \
+            "PRODUCT_BUNDLE_IDENTIFIER = com.webdevsolutions.motogo|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PROVISIONING_PROFILE_SPECIFIER" \
             "$PROJECT" || true
 
       # =========================================================
