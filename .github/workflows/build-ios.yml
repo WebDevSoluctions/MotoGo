@@ -15,16 +15,9 @@ jobs:
       APPLE_BUNDLE_ID: com.webdevsolutions.motogo
 
     steps:
-
-      # =========================================================
-      # 1. CHECKOUT
-      # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # =========================================================
-      # 2. FLUTTER
-      # =========================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -34,52 +27,36 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      # =========================================================
-      # 3. DEPENDENCIES
-      # =========================================================
       - name: Flutter pub get
         run: flutter pub get
 
-      # =========================================================
-      # 4. COCOAPODS
-      # =========================================================
-      - name: Install CocoaPods
+      - name: Install CocoaPods and xcodeproj
         run: |
           set -e
-          sudo gem install cocoapods
+          sudo gem install cocoapods --no-document
+          sudo gem install xcodeproj --no-document
           pod --version
+          ruby -e 'require "xcodeproj"; puts "xcodeproj OK"'
 
-      # =========================================================
-      # 5. CLEAN
-      # =========================================================
-      - name: Clean Flutter
+      - name: Clean Flutter and Pods
         run: |
           set -e
-
           flutter clean
           flutter pub get
-
           rm -rf ios/Pods
           rm -rf ios/.symlinks
           rm -rf ios/Flutter/ephemeral
 
-      # =========================================================
-      # 6. INSTALL PODS
-      # =========================================================
       - name: Install Pods
         working-directory: ios
         run: |
           set -e
           pod install --repo-update
 
-      # =========================================================
-      # 7. CREATE KEYCHAIN
-      # =========================================================
       - name: Create signing keychain
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
-
         run: |
           set -e
 
@@ -89,20 +66,11 @@ jobs:
 
           echo "$CERTIFICATE_BASE64" | base64 --decode > "$CERT"
 
-          security create-keychain \
-            -p "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
 
-          security set-keychain-settings \
-            -lut 21600 \
-            "$KEYCHAIN"
-
-          security unlock-keychain \
-            -p "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN"
-
-          security import \
-            "$CERT" \
+          security import "$CERT" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
@@ -115,23 +83,13 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN"
 
-          security list-keychains \
-            -d user \
-            -s "$KEYCHAIN"
-
-          security default-keychain \
-            -s "$KEYCHAIN"
-
-          security unlock-keychain \
-            -p "$KEYCHAIN_PASSWORD" \
-            "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
 
           echo "Keychain configurado."
 
-      # =========================================================
-      # 8. VERIFY CERTIFICATE
-      # =========================================================
-      - name: Verify certificate
+      - name: Verify Apple Distribution certificate
         run: |
           set -e
 
@@ -144,13 +102,9 @@ jobs:
             -p codesigning \
             "$RUNNER_TEMP/build.keychain-db"
 
-      # =========================================================
-      # 9. INSTALL PROVISIONING PROFILE
-      # =========================================================
-      - name: Install App Store Provisioning Profile
+      - name: Install App Store provisioning profile
         env:
           PROFILE_BASE64: ${{ secrets.APPSTORE_PROVISIONING_PROFILE_BASE64 }}
-
         run: |
           set -e
 
@@ -161,8 +115,7 @@ jobs:
 
           echo "$PROFILE_BASE64" | base64 --decode > "$PROFILE_FILE"
 
-          security cms \
-            -D \
+          security cms -D \
             -i "$PROFILE_FILE" \
             > "$RUNNER_TEMP/profile.plist"
 
@@ -190,14 +143,19 @@ jobs:
               "$RUNNER_TEMP/profile.plist"
           )
 
+          APS_ENV=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Entitlements:aps-environment" \
+              "$RUNNER_TEMP/profile.plist" 2>/dev/null || true
+          )
+
           echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
           echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
           echo "PROFILE_TEAM_ID=$PROFILE_TEAM_ID" >> "$GITHUB_ENV"
           echo "PROFILE_APP_ID=$PROFILE_APP_ID" >> "$GITHUB_ENV"
+          echo "PROFILE_APS_ENV=$APS_ENV" >> "$GITHUB_ENV"
 
-          cp \
-            "$PROFILE_FILE" \
-            "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+          cp "$PROFILE_FILE" "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
 
           echo "=========================================="
           echo "PROFILE"
@@ -206,25 +164,13 @@ jobs:
           echo "UUID: $PROFILE_UUID"
           echo "Team: $PROFILE_TEAM_ID"
           echo "App ID: $PROFILE_APP_ID"
+          echo "Push Notifications: ${APS_ENV:-NAO ENCONTRADO}"
 
-          echo ""
-          echo "Push Notifications:"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:aps-environment" \
-            "$RUNNER_TEMP/profile.plist" \
-            || true
-
-      # =========================================================
-      # 10. VALIDATE PROFILE
-      # =========================================================
       - name: Validate provisioning profile
         run: |
           set -e
 
-          echo "=========================================="
-          echo "VALIDANDO PROFILE"
-          echo "=========================================="
+          EXPECTED_APP_ID="$APPLE_TEAM_ID.$APPLE_BUNDLE_ID"
 
           if [ "$PROFILE_TEAM_ID" != "$APPLE_TEAM_ID" ]; then
             echo "ERRO: Team ID do profile diferente."
@@ -233,8 +179,6 @@ jobs:
             exit 1
           fi
 
-          EXPECTED_APP_ID="$APPLE_TEAM_ID.$APPLE_BUNDLE_ID"
-
           if [ "$PROFILE_APP_ID" != "$EXPECTED_APP_ID" ]; then
             echo "ERRO: Application ID incorreto."
             echo "Esperado: $EXPECTED_APP_ID"
@@ -242,236 +186,147 @@ jobs:
             exit 1
           fi
 
+          if [ -z "$PROFILE_APS_ENV" ]; then
+            echo "ERRO: O provisioning profile nao possui aps-environment."
+            echo "Regere o App Store profile com Push Notifications habilitado."
+            exit 1
+          fi
+
           echo "Team ID correto."
           echo "Bundle ID correto."
+          echo "Push Notifications configurado."
           echo "Profile valido."
 
-      # =========================================================
-      # 11. REMOVE SIGNING FROM PODS
-      # =========================================================
-      - name: Configure Pods without signing
+      - name: Verify Podfile signing configuration
         run: |
           set -e
 
-          python3 <<'PY'
-          from pathlib import Path
+          if ! grep -q "CODE_SIGNING_ALLOWED.*NO" ios/Podfile; then
+            echo "ERRO: ios/Podfile nao esta configurado para impedir assinatura dos Pods."
+            exit 1
+          fi
 
-          path = Path("ios/Podfile")
-          text = path.read_text()
+          echo "Podfile: Pods sem assinatura."
 
-          marker = "config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'"
+      - name: Build Flutter iOS without signing
+        run: |
+          set -e
+          flutter build ios --release --no-codesign
 
-          if marker not in text:
-              print("Aviso: configuracao de Pods nao encontrada.")
-              print("Continuando...")
-          else:
-              print("Pods configurados sem assinatura.")
-          PY
-
-          cd ios
-          pod install
-          cd ..
-
-      # =========================================================
-      # 12. CONFIGURE ONLY RUNNER SIGNING
-      # =========================================================
-      - name: Configure Runner signing
+      # IMPORTANT:
+      # Signing is configured AFTER Flutter build so Flutter cannot overwrite it.
+      # Only the Runner target receives the provisioning profile.
+      - name: Configure ONLY Runner signing after Flutter build
         run: |
           set -e
 
-          PROJECT="ios/Runner.xcodeproj/project.pbxproj"
+          ruby <<'RUBY'
+          require 'xcodeproj'
 
-          python3 - "$PROJECT" "$PROFILE_UUID" "$APPLE_TEAM_ID" <<'PY'
-          import sys
-          import re
-          from pathlib import Path
+          project_path = 'ios/Runner.xcodeproj'
+          project = Xcodeproj::Project.open(project_path)
 
-          project_path = Path(sys.argv[1])
-          profile_uuid = sys.argv[2]
-          team_id = sys.argv[3]
+          target = project.targets.find { |t| t.name == 'Runner' }
+          raise 'ERRO: target Runner nao encontrado' unless target
 
-          text = project_path.read_text()
+          release = target.build_configurations.find { |c| c.name == 'Release' }
+          raise 'ERRO: configuracao Release nao encontrada no Runner' unless release
 
-          # -----------------------------------------------------
-          # IMPORTANTE:
-          # Remover provisioning profile de TODAS as configuracoes
-          # para impedir que Firebase, gRPC, GoogleMaps etc.
-          # recebam o profile.
-          # -----------------------------------------------------
+          # Remove manual profile settings from the PROJECT level.
+          # This prevents Pods/Swift Package targets from inheriting a profile.
+          project.build_configurations.each do |config|
+            config.build_settings.delete('PROVISIONING_PROFILE_SPECIFIER')
+            config.build_settings.delete('PROVISIONING_PROFILE')
+          end
 
-          text = re.sub(
-              r'^\s*PROVISIONING_PROFILE_SPECIFIER\s*=\s*[^;]+;\s*$',
-              '',
-              text,
-              flags=re.MULTILINE
-          )
+          # Remove profile/team settings from non-Runner targets if present.
+          project.targets.each do |other_target|
+            next if other_target == target
 
-          text = re.sub(
-              r'^\s*PROVISIONING_PROFILE\s*=\s*[^;]+;\s*$',
-              '',
-              text,
-              flags=re.MULTILINE
-          )
+            other_target.build_configurations.each do |config|
+              config.build_settings.delete('PROVISIONING_PROFILE_SPECIFIER')
+              config.build_settings.delete('PROVISIONING_PROFILE')
+              config.build_settings.delete('DEVELOPMENT_TEAM')
+            end
+          end
 
-          # -----------------------------------------------------
-          # Remover DEVELOPMENT_TEAM de configuracoes globais.
-          # O Runner recebera abaixo.
-          # -----------------------------------------------------
+          settings = release.build_settings
 
-          text = re.sub(
-              r'^\s*DEVELOPMENT_TEAM\s*=\s*[^;]+;\s*$',
-              '',
-              text,
-              flags=re.MULTILINE
-          )
+          settings['CODE_SIGN_STYLE'] = 'Manual'
+          settings['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
+          settings['DEVELOPMENT_TEAM'] = ENV.fetch('APPLE_TEAM_ID')
+          settings['PROVISIONING_PROFILE_SPECIFIER'] = ENV.fetch('PROFILE_NAME')
+          settings['CODE_SIGNING_ALLOWED'] = 'YES'
+          settings['CODE_SIGNING_REQUIRED'] = 'YES'
 
-          # -----------------------------------------------------
-          # Encontrar configuracoes Release que possuem o Bundle ID
-          # do Runner.
-          # -----------------------------------------------------
+          if File.exist?('ios/Runner/Runner.entitlements')
+            settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
+          end
 
-          blocks = list(re.finditer(
-              r'([A-F0-9]{24}) /\* Release \*/ = \{(.*?)\n\s*\};',
-              text,
-              re.S
-          ))
+          # Keep Debug/Profile automatic so only Release/App Store is manually signed.
+          target.build_configurations.each do |config|
+            next if config.name == 'Release'
 
-          found = False
+            config.build_settings.delete('PROVISIONING_PROFILE_SPECIFIER')
+            config.build_settings.delete('PROVISIONING_PROFILE')
+            config.build_settings['CODE_SIGN_STYLE'] = 'Automatic'
+            config.build_settings['DEVELOPMENT_TEAM'] = ENV.fetch('APPLE_TEAM_ID')
+          end
 
-          for match in blocks:
+          project.save
 
-              block = match.group(2)
+          puts '=========================================='
+          puts 'RUNNER RELEASE SIGNING CONFIGURADO'
+          puts '=========================================='
+          puts "Target: Runner"
+          puts "Configuration: Release"
+          puts "DEVELOPMENT_TEAM: #{settings['DEVELOPMENT_TEAM']}"
+          puts "CODE_SIGN_STYLE: #{settings['CODE_SIGN_STYLE']}"
+          puts "CODE_SIGN_IDENTITY: #{settings['CODE_SIGN_IDENTITY']}"
+          puts "PROVISIONING_PROFILE_SPECIFIER: #{settings['PROVISIONING_PROFILE_SPECIFIER']}"
+          puts "CODE_SIGNING_ALLOWED: #{settings['CODE_SIGNING_ALLOWED']}"
+          RUBY
 
-              if "PRODUCT_BUNDLE_IDENTIFIER = com.webdevsolutions.motogo;" not in block:
-                  continue
-
-              new_block = block
-
-              # Garantir assinatura manual apenas no Runner Release.
-
-              if "CODE_SIGN_STYLE = Manual;" not in new_block:
-                  new_block = (
-                      "                    CODE_SIGN_STYLE = Manual;\n"
-                      + new_block
-                  )
-
-              if "CODE_SIGN_IDENTITY = \"Apple Distribution\";" not in new_block:
-                  new_block = (
-                      "                    CODE_SIGN_IDENTITY = \"Apple Distribution\";\n"
-                      + new_block
-                  )
-
-              new_block = (
-                  f"                    DEVELOPMENT_TEAM = {team_id};\n"
-                  + new_block
-              )
-
-              new_block = (
-                  f"                    PROVISIONING_PROFILE_SPECIFIER = \"{profile_uuid}\";\n"
-                  + new_block
-              )
-
-              start = match.start(2)
-              end = match.end(2)
-
-              text = text[:start] + new_block + text[end:]
-
-              found = True
-              break
-
-          if not found:
-              raise SystemExit(
-                  "ERRO: configuracao Release do Runner nao encontrada."
-              )
-
-          project_path.write_text(text)
-
-          print("==========================================")
-          print("RUNNER CONFIGURADO")
-          print("==========================================")
-          print(f"Team ID: {team_id}")
-          print(f"Profile UUID: {profile_uuid}")
-          print("Code Sign Style: Manual")
-          print("Certificate: Apple Distribution")
-          PY
-
-      # =========================================================
-      # 13. FORCE DEPENDENCIES TO AUTOMATIC
-      # =========================================================
-      - name: Fix dependency signing
-        run: |
-          set -e
-
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          files = [
-              Path("ios/Pods/Pods.xcodeproj/project.pbxproj"),
-              Path("ios/Runner.xcodeproj/project.pbxproj")
-          ]
-
-          for path in files:
-              if not path.exists():
-                  continue
-
-              text = path.read_text()
-
-              # Nunca deixar provisioning profile nos Pods.
-              if "Pods.xcodeproj" in str(path):
-                  text = re.sub(
-                      r'^\s*PROVISIONING_PROFILE_SPECIFIER\s*=\s*[^;]+;\s*$',
-                      '                    PROVISIONING_PROFILE_SPECIFIER = "";',
-                      text,
-                      flags=re.MULTILINE
-                  )
-
-                  text = re.sub(
-                      r'^\s*PROVISIONING_PROFILE\s*=\s*[^;]+;\s*$',
-                      '                    PROVISIONING_PROFILE = "";',
-                      text,
-                      flags=re.MULTILINE
-                  )
-
-              path.write_text(text)
-
-              print(f"Processado: {path}")
-          PY
-
-      # =========================================================
-      # 14. BUILD FLUTTER
-      # =========================================================
-      - name: Build Flutter iOS
-        run: |
-          set -e
-
-          flutter build ios \
-            --release \
-            --no-codesign
-
-      # =========================================================
-      # 15. VERIFY SETTINGS
-      # =========================================================
-      - name: Verify Xcode settings
+      - name: Verify final Xcode signing settings
         run: |
           set -e
 
           echo "=========================================="
-          echo "RUNNER RELEASE SETTINGS"
+          echo "FINAL RUNNER RELEASE SETTINGS"
           echo "=========================================="
 
-          xcodebuild \
+          SETTINGS="$(xcodebuild \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
-            -showBuildSettings \
-            | grep -E \
-              "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGNING_ALLOWED" \
-              || true
+            -showBuildSettings)"
 
-      # =========================================================
-      # 16. ARCHIVE
-      # =========================================================
+          echo "$SETTINGS" | grep -E \
+            "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGNING_ALLOWED" \
+            || true
+
+          echo "$SETTINGS" | grep -q "DEVELOPMENT_TEAM = $APPLE_TEAM_ID" || {
+            echo "ERRO: DEVELOPMENT_TEAM nao chegou ao Runner Release."
+            exit 1
+          }
+
+          echo "$SETTINGS" | grep -q "CODE_SIGN_STYLE = Manual" || {
+            echo "ERRO: CODE_SIGN_STYLE nao esta Manual."
+            exit 1
+          }
+
+          echo "$SETTINGS" | grep -q "PROVISIONING_PROFILE_SPECIFIER = $PROFILE_NAME" || {
+            echo "ERRO: provisioning profile nao chegou ao Runner Release."
+            exit 1
+          }
+
+          echo "$SETTINGS" | grep -q "PRODUCT_BUNDLE_IDENTIFIER = $APPLE_BUNDLE_ID" || {
+            echo "ERRO: Bundle ID incorreto no Runner Release."
+            exit 1
+          }
+
+          echo "Configuracao final OK."
+
       - name: Archive iOS App
         run: |
           set -e
@@ -482,12 +337,12 @@ jobs:
           echo "=========================================="
           echo "CRIANDO ARCHIVE"
           echo "=========================================="
-
           echo "Team ID: $APPLE_TEAM_ID"
           echo "Bundle ID: $APPLE_BUNDLE_ID"
-          echo "Profile UUID: $PROFILE_UUID"
           echo "Profile Name: $PROFILE_NAME"
 
+          # Do NOT pass signing/profile arguments globally here.
+          # Runner gets its settings from the Xcode project; dependencies stay unsigned.
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
@@ -496,9 +351,6 @@ jobs:
             -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
             archive
 
-      # =========================================================
-      # 17. VERIFY ARCHIVE
-      # =========================================================
       - name: Verify Archive
         run: |
           set -e
@@ -516,9 +368,6 @@ jobs:
 
           ls -lah "$ARCHIVE"
 
-      # =========================================================
-      # 18. EXPORT OPTIONS
-      # =========================================================
       - name: Create ExportOptions.plist
         run: |
           set -e
@@ -529,7 +378,6 @@ jobs:
           "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-
               <key>method</key>
               <string>app-store</string>
 
@@ -556,16 +404,13 @@ jobs:
 
               <key>compileBitcode</key>
               <false/>
-
           </dict>
           </plist>
           EOF
 
+          plutil -lint ios/ExportOptions.plist
           cat ios/ExportOptions.plist
 
-      # =========================================================
-      # 19. EXPORT IPA
-      # =========================================================
       - name: Export IPA
         run: |
           set -e
@@ -579,9 +424,6 @@ jobs:
             -exportPath "$GITHUB_WORKSPACE/build/ios/ipa" \
             -exportOptionsPlist "$GITHUB_WORKSPACE/ios/ExportOptions.plist"
 
-      # =========================================================
-      # 20. VERIFY IPA
-      # =========================================================
       - name: Verify IPA
         run: |
           set -e
@@ -599,9 +441,6 @@ jobs:
 
           ls -lh "$IPA"
 
-      # =========================================================
-      # 21. VERIFY IPA SIGNING
-      # =========================================================
       - name: Verify IPA signing
         run: |
           set -e
@@ -610,9 +449,7 @@ jobs:
 
           mkdir -p "$RUNNER_TEMP/ipa-check"
 
-          unzip -q \
-            "$IPA" \
-            -d "$RUNNER_TEMP/ipa-check"
+          unzip -q "$IPA" -d "$RUNNER_TEMP/ipa-check"
 
           APP=$(find \
             "$RUNNER_TEMP/ipa-check/Payload" \
@@ -630,26 +467,15 @@ jobs:
           echo "ASSINATURA"
           echo "=========================================="
 
-          codesign \
-            -dv \
-            --verbose=4 \
-            "$APP" \
-            2>&1
+          codesign -dv --verbose=4 "$APP" 2>&1
 
           echo ""
           echo "=========================================="
           echo "ENTITLEMENTS"
           echo "=========================================="
 
-          codesign \
-            -d \
-            --entitlements :- \
-            "$APP" \
-            2>/dev/null || true
+          codesign -d --entitlements :- "$APP" 2>/dev/null || true
 
-      # =========================================================
-      # 22. VERIFY BUNDLE ID
-      # =========================================================
       - name: Verify Bundle ID
         run: |
           set -e
@@ -658,9 +484,7 @@ jobs:
 
           mkdir -p "$RUNNER_TEMP/bundle-check"
 
-          unzip -q \
-            "$IPA" \
-            -d "$RUNNER_TEMP/bundle-check"
+          unzip -q "$IPA" -d "$RUNNER_TEMP/bundle-check"
 
           APP=$(find \
             "$RUNNER_TEMP/bundle-check/Payload" \
@@ -686,9 +510,6 @@ jobs:
 
           echo "Bundle ID correto."
 
-      # =========================================================
-      # 23. UPLOAD IPA
-      # =========================================================
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
@@ -697,9 +518,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # =========================================================
-      # 24. UPLOAD ARCHIVE
-      # =========================================================
       - name: Upload Archive
         uses: actions/upload-artifact@v4
         with:
@@ -708,9 +526,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # =========================================================
-      # 25. CLEAN KEYCHAIN
-      # =========================================================
       - name: Cleanup signing keychain
         if: always()
         run: |
