@@ -380,7 +380,7 @@ jobs:
               "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGNING_ALLOWED|CODE_SIGNING_REQUIRED" \
               || true
 
-      # =========================================================
+            # =========================================================
       # 14. CRIAR ARCHIVE
       # =========================================================
       - name: Archive iOS App
@@ -394,19 +394,9 @@ jobs:
           echo "CRIANDO ARCHIVE"
           echo "=========================================="
 
-          echo "Team: $APPLE_TEAM_ID"
+          echo "Team ID: $APPLE_TEAM_ID"
           echo "Bundle ID: $APPLE_BUNDLE_ID"
           echo "Profile UUID: $PROFILE_UUID"
-          echo "Certificate: Apple Distribution"
-
-          # IMPORTANTE:
-          # NAO PASSAR PROVISIONING_PROFILE_SPECIFIER
-          # PELO XCODEBUILD.
-          #
-          # A configuracao esta SOMENTE no target Runner Release.
-          #
-          # Isso evita que os targets Swift Package/CocoaPods
-          # recebam o provisioning profile.
 
           xcodebuild \
             -workspace ios/Runner.xcworkspace \
@@ -414,8 +404,10 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -archivePath "$GITHUB_WORKSPACE/build/ios/archive/Runner.xcarchive" \
-            archive \
-            | tee "$RUNNER_TEMP/xcodebuild-archive.log"
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            archive
 
       # =========================================================
       # 15. VERIFICAR ARCHIVE
