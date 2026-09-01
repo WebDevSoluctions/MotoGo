@@ -16,8 +16,16 @@ jobs:
 
     steps:
 
+      # =========================================================
+      # CHECKOUT
+      # =========================================================
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      # =========================================================
+      # FLUTTER
+      # =========================================================
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -31,11 +39,21 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      # =========================================================
+      # COCOAPODS
+      # =========================================================
+
       - name: Install CocoaPods
         run: |
           set -e
+
           sudo gem install cocoapods
+
           pod --version
+
+      # =========================================================
+      # CLEAN
+      # =========================================================
 
       - name: Clean Flutter
         run: |
@@ -48,14 +66,19 @@ jobs:
           rm -rf ios/.symlinks
           rm -rf ios/Flutter/ephemeral
 
+      # =========================================================
+      # POD INSTALL
+      # =========================================================
+
       - name: Install Pods
         working-directory: ios
         run: |
           set -e
+
           pod install --repo-update
 
       # =========================================================
-      # CERTIFICADO
+      # CERTIFICATE
       # =========================================================
 
       - name: Create signing keychain
@@ -111,12 +134,16 @@ jobs:
 
           echo "Keychain configurado."
 
+      # =========================================================
+      # VERIFY CERTIFICATE
+      # =========================================================
+
       - name: Verify certificate
         run: |
           set -e
 
           echo "=========================================="
-          echo "CERTIFICADOS"
+          echo "CERTIFICADOS DE ASSINATURA"
           echo "=========================================="
 
           security find-identity \
@@ -137,37 +164,46 @@ jobs:
 
           PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
           PROFILE_FILE="$RUNNER_TEMP/MotoGo_App_Store.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
 
           mkdir -p "$PROFILE_DIR"
 
           echo "$PROFILE_BASE64" | base64 --decode > "$PROFILE_FILE"
 
-          security cms -D \
+          security cms \
+            -D \
             -i "$PROFILE_FILE" \
-            > "$RUNNER_TEMP/profile.plist"
+            > "$PROFILE_PLIST"
 
           PROFILE_UUID=$(
             /usr/libexec/PlistBuddy \
               -c "Print :UUID" \
-              "$RUNNER_TEMP/profile.plist"
+              "$PROFILE_PLIST"
           )
 
           PROFILE_NAME=$(
             /usr/libexec/PlistBuddy \
               -c "Print :Name" \
-              "$RUNNER_TEMP/profile.plist"
+              "$PROFILE_PLIST"
           )
 
           PROFILE_APP_ID=$(
             /usr/libexec/PlistBuddy \
               -c "Print :Entitlements:application-identifier" \
-              "$RUNNER_TEMP/profile.plist"
+              "$PROFILE_PLIST"
           )
 
           PROFILE_TEAM_ID=$(
             /usr/libexec/PlistBuddy \
               -c "Print :TeamIdentifier:0" \
-              "$RUNNER_TEMP/profile.plist"
+              "$PROFILE_PLIST"
+          )
+
+          APS_ENVIRONMENT=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :Entitlements:aps-environment" \
+              "$PROFILE_PLIST" \
+              2>/dev/null || true
           )
 
           echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
@@ -177,275 +213,197 @@ jobs:
           echo "=========================================="
           echo "PROVISIONING PROFILE"
           echo "=========================================="
+
           echo "Name: $PROFILE_NAME"
           echo "UUID: $PROFILE_UUID"
           echo "App ID: $PROFILE_APP_ID"
           echo "Team ID: $PROFILE_TEAM_ID"
+          echo "Push Notifications: $APS_ENVIRONMENT"
+
+          # -----------------------------------------------------
+          # VALIDATE TEAM
+          # -----------------------------------------------------
 
           if [ "$PROFILE_TEAM_ID" != "$APPLE_TEAM_ID" ]; then
-            echo "ERRO: Team ID do profile diferente."
+            echo ""
+            echo "ERRO: Team ID do provisioning profile incorreto."
+            echo "Esperado: $APPLE_TEAM_ID"
+            echo "Encontrado: $PROFILE_TEAM_ID"
             exit 1
           fi
 
-          case "$PROFILE_APP_ID" in
-            "$APPLE_TEAM_ID.$APPLE_BUNDLE_ID")
-              echo "Bundle ID do profile correto."
-              ;;
-            *)
-              echo "ERRO: Bundle ID incorreto no provisioning profile."
-              echo "Esperado: $APPLE_TEAM_ID.$APPLE_BUNDLE_ID"
-              echo "Encontrado: $PROFILE_APP_ID"
-              exit 1
-              ;;
-          esac
+          # -----------------------------------------------------
+          # VALIDATE BUNDLE ID
+          # -----------------------------------------------------
+
+          EXPECTED_APP_ID="$APPLE_TEAM_ID.$APPLE_BUNDLE_ID"
+
+          if [ "$PROFILE_APP_ID" != "$EXPECTED_APP_ID" ]; then
+            echo ""
+            echo "ERRO: Bundle ID do provisioning profile incorreto."
+            echo "Esperado: $EXPECTED_APP_ID"
+            echo "Encontrado: $PROFILE_APP_ID"
+            exit 1
+          fi
+
+          # -----------------------------------------------------
+          # VALIDATE PUSH NOTIFICATIONS
+          # -----------------------------------------------------
+
+          if [ -z "$APS_ENVIRONMENT" ]; then
+            echo ""
+            echo "ERRO: O provisioning profile não possui"
+            echo "aps-environment."
+            echo ""
+            echo "Regere o App Store Provisioning Profile"
+            echo "com Push Notifications habilitado."
+            exit 1
+          fi
+
+          # -----------------------------------------------------
+          # INSTALL PROFILE
+          # -----------------------------------------------------
 
           cp \
             "$PROFILE_FILE" \
             "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
 
           echo ""
-          echo "Push Notifications:"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:aps-environment" \
-            "$RUNNER_TEMP/profile.plist" || true
+          echo "Provisioning profile instalado com sucesso."
 
       # =========================================================
-      # CONFIGURA APENAS O TARGET RUNNER
+      # INSTALL XCODEPROJ GEM
+      # =========================================================
+
+      - name: Install xcodeproj
+        run: |
+          set -e
+
+          sudo gem install xcodeproj --no-document
+
+          ruby -e 'require "xcodeproj"; puts Xcodeproj::VERSION'
+
+      # =========================================================
+      # CONFIGURE ONLY RUNNER TARGET
       # =========================================================
 
       - name: Configure Runner signing
+        env:
+          PROFILE_UUID: ${{ env.PROFILE_UUID }}
+
         run: |
           set -e
 
-          PROJECT="ios/Runner.xcodeproj/project.pbxproj"
+          ruby <<'RUBY'
+          require 'xcodeproj'
 
-          python3 - "$PROJECT" "$PROFILE_UUID" "$APPLE_TEAM_ID" <<'PY'
-          import sys
-          import re
-          from pathlib import Path
+          project_path = 'ios/Runner.xcodeproj'
 
-          project_path = Path(sys.argv[1])
-          profile_uuid = sys.argv[2]
-          team_id = sys.argv[3]
+          team_id = ENV.fetch('APPLE_TEAM_ID')
+          profile_uuid = ENV.fetch('PROFILE_UUID')
 
-          text = project_path.read_text()
+          project = Xcodeproj::Project.open(project_path)
 
-          # -----------------------------------------------------
-          # IMPORTANTE:
-          # Não colocamos provisioning profile no nível global.
-          # Apenas o TARGET Runner recebe assinatura manual.
-          # -----------------------------------------------------
+          runner = project.targets.find do |target|
+            target.name == 'Runner'
+          end
 
-          target_match = re.search(
-              r'(/\* Begin PBXNativeTarget section \*/.*?/\* End PBXNativeTarget section \*/)',
-              text,
-              re.S
-          )
+          unless runner
+            abort 'ERRO: Target Runner não encontrado.'
+          end
 
-          if not target_match:
-              raise SystemExit("PBXNativeTarget section não encontrada.")
+          release_config = runner.build_configurations.find do |config|
+            config.name == 'Release'
+          end
 
-          native_targets = target_match.group(1)
+          unless release_config
+            abort 'ERRO: Configuração Release do Runner não encontrada.'
+          end
 
-          runner_match = re.search(
-              r'([A-F0-9]{24}) /\* Runner \*/ = \{.*?\n\s*buildConfigurationList = ([A-F0-9]{24}) /\* Build configuration list for PBXNativeTarget "Runner" \*/;',
-              native_targets,
-              re.S
-          )
-
-          if not runner_match:
-              raise SystemExit(
-                  'Target "Runner" não encontrado no project.pbxproj.'
-              )
-
-          runner_config_list = runner_match.group(2)
-
-          print("Runner target encontrado.")
-          print("Build configuration list:", runner_config_list)
+          settings = release_config.build_settings
 
           # -----------------------------------------------------
-          # Localiza o PBXNativeTarget Runner e descobre somente
-          # suas configurações.
+          # SOMENTE TARGET RUNNER
           # -----------------------------------------------------
 
-          config_section_match = re.search(
-              r'/\* Begin XCBuildConfiguration section \*/(.*?)/\* End XCBuildConfiguration section \*/',
-              text,
-              re.S
-          )
-
-          if not config_section_match:
-              raise SystemExit(
-                  "XCBuildConfiguration section não encontrada."
-              )
-
-          configs = config_section_match.group(1)
-
-          # Encontrar o XCConfigurationList do Runner
-          lists_match = re.search(
-              r'/\* Begin XCConfigurationList section \*/(.*?)/\* End XCConfigurationList section \*/',
-              text,
-              re.S
-          )
-
-          if not lists_match:
-              raise SystemExit(
-                  "XCConfigurationList section não encontrada."
-              )
-
-          lists = lists_match.group(1)
-
-          runner_list_match = re.search(
-              rf'{re.escape(runner_config_list)} /\* Build configuration list for PBXNativeTarget "Runner" \*/ = \{{(.*?)\n\s*\}};',
-              lists,
-              re.S
-          )
-
-          if not runner_list_match:
-              raise SystemExit(
-                  "Configuração do target Runner não encontrada."
-              )
-
-          runner_list_body = runner_list_match.group(1)
-
-          config_ids = re.findall(
-              r'([A-F0-9]{24}) /\* (Debug|Profile|Release) \*/',
-              runner_list_body
-          )
-
-          if not config_ids:
-              raise SystemExit(
-                  "Configurações Debug/Profile/Release do Runner não encontradas."
-              )
-
-          print("Configurações Runner encontradas:")
-          for cid, name in config_ids:
-              print(" ", name, cid)
+          settings['CODE_SIGN_STYLE'] = 'Manual'
+          settings['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
+          settings['DEVELOPMENT_TEAM'] = team_id
+          settings['PROVISIONING_PROFILE_SPECIFIER'] = profile_uuid
+          settings['CODE_SIGNING_ALLOWED'] = 'YES'
+          settings['CODE_SIGNING_REQUIRED'] = 'YES'
 
           # -----------------------------------------------------
-          # Altera APENAS as configurações do Runner.
+          # ENTITLEMENTS
           # -----------------------------------------------------
 
-          for config_id, config_name in config_ids:
+          entitlements_path = 'ios/Runner/Runner.entitlements'
 
-              pattern = re.compile(
-                  rf'({re.escape(config_id)} /\* {re.escape(config_name)} \*/ = \{{)(.*?)(\n\s*\}};)',
-                  re.S
-              )
+          if File.exist?(entitlements_path)
+            settings['CODE_SIGN_ENTITLEMENTS'] = 'Runner/Runner.entitlements'
+          end
 
-              match = pattern.search(text)
+          project.save
 
-              if not match:
-                  raise SystemExit(
-                      f"Configuração {config_name} não encontrada."
-                  )
-
-              body = match.group(2)
-
-              # Remover somente assinatura existente nessa
-              # configuração do Runner.
-              body = re.sub(
-                  r'\n\s*CODE_SIGN_STYLE = [^;]+;',
-                  '',
-                  body
-              )
-
-              body = re.sub(
-                  r'\n\s*CODE_SIGN_IDENTITY(?:\[[^\]]+\])? = [^;]+;',
-                  '',
-                  body
-              )
-
-              body = re.sub(
-                  r'\n\s*DEVELOPMENT_TEAM = [^;]+;',
-                  '',
-                  body
-              )
-
-              body = re.sub(
-                  r'\n\s*PROVISIONING_PROFILE_SPECIFIER(?:\[[^\]]+\])? = [^;]+;',
-                  '',
-                  body
-              )
-
-              # Release será manual.
-              # Debug/Profile ficam automatic.
-              if config_name == "Release":
-                  signing = f"""
-                  CODE_SIGN_STYLE = Manual;
-                  CODE_SIGN_IDENTITY = "Apple Distribution";
-                  DEVELOPMENT_TEAM = {team_id};
-                  PROVISIONING_PROFILE_SPECIFIER = "{profile_uuid}";
-                  """
-              else:
-                  signing = f"""
-                  CODE_SIGN_STYLE = Automatic;
-                  DEVELOPMENT_TEAM = {team_id};
-                  """
-
-              body = signing + body
-
-              text = (
-                  text[:match.start(2)]
-                  + body
-                  + text[match.end(2):]
-              )
-
-          project_path.write_text(text)
-
-          print("")
-          print("==========================================")
-          print("RUNNER CONFIGURADO")
-          print("==========================================")
-          print("Release:")
-          print("  CODE_SIGN_STYLE = Manual")
-          print('  CODE_SIGN_IDENTITY = "Apple Distribution"')
-          print(f"  DEVELOPMENT_TEAM = {team_id}")
-          print(f"  PROVISIONING_PROFILE_SPECIFIER = {profile_uuid}")
-          print("")
-          print("Demais configurações:")
-          print("  CODE_SIGN_STYLE = Automatic")
-          PY
+          puts ''
+          puts '=========================================='
+          puts 'RUNNER CONFIGURADO'
+          puts '=========================================='
+          puts "Target: Runner"
+          puts "Configuration: Release"
+          puts "Team ID: #{team_id}"
+          puts "Profile UUID: #{profile_uuid}"
+          puts 'Signing Style: Manual'
+          puts 'Signing Identity: Apple Distribution'
+          puts ''
+          puts 'Provisioning profile aplicado SOMENTE ao Runner.'
+          RUBY
 
       # =========================================================
-      # GARANTE QUE NÃO EXISTE PROFILE GLOBAL
+      # VERIFY RUNNER SETTINGS
       # =========================================================
 
-      - name: Remove global provisioning profile settings
+      - name: Verify Runner signing settings
         run: |
           set -e
 
-          PROJECT="ios/Runner.xcodeproj/project.pbxproj"
+          echo "=========================================="
+          echo "RUNNER SIGNING SETTINGS"
+          echo "=========================================="
 
-          python3 - "$PROJECT" <<'PY'
-          import re
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          text = path.read_text()
-
-          # Remove qualquer configuração de provisioning profile
-          # que esteja fora das configurações específicas do Runner.
-          #
-          # O objetivo principal é evitar que Swift Packages
-          # recebam PROVISIONING_PROFILE_SPECIFIER.
-
-          print("Verificando configurações de assinatura...")
-
-          print("")
-          print("Ocorrências de provisioning profile:")
-          for line in text.splitlines():
-              if "PROVISIONING_PROFILE_SPECIFIER" in line:
-                  print(line.strip())
-
-          print("")
-          print("Verificação concluída.")
-          PY
+          xcodebuild \
+            -project ios/Runner.xcodeproj \
+            -target Runner \
+            -configuration Release \
+            -showBuildSettings \
+            | grep -E \
+              'PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_ENTITLEMENTS|CODE_SIGNING_ALLOWED|CODE_SIGNING_REQUIRED' \
+              || true
 
       # =========================================================
-      # BUILD FLUTTER
+      # VERIFY PODFILE SIGNING
+      # =========================================================
+
+      - name: Verify Pods signing configuration
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "PODFILE"
+          echo "=========================================="
+
+          if [ -f ios/Podfile ]; then
+            grep -n \
+              -E \
+              'CODE_SIGNING_ALLOWED|CODE_SIGNING_REQUIRED|PROVISIONING_PROFILE_SPECIFIER|DEVELOPMENT_TEAM' \
+              ios/Podfile \
+              || true
+          else
+            echo "Aviso: ios/Podfile não encontrado."
+          fi
+
+      # =========================================================
+      # FLUTTER BUILD
       # =========================================================
 
       - name: Build Flutter iOS
@@ -455,27 +413,6 @@ jobs:
           flutter build ios \
             --release \
             --no-codesign
-
-      # =========================================================
-      # VERIFICAR SETTINGS
-      # =========================================================
-
-      - name: Verify Xcode settings
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "RUNNER RELEASE SETTINGS"
-          echo "=========================================="
-
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -showBuildSettings \
-            | grep -E \
-              "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGNING_ALLOWED|CODE_SIGNING_REQUIRED" \
-              || true
 
       # =========================================================
       # ARCHIVE
@@ -531,12 +468,9 @@ jobs:
 
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-
               <key>method</key>
               <string>app-store</string>
 
@@ -563,13 +497,12 @@ jobs:
 
               <key>compileBitcode</key>
               <false/>
-
           </dict>
           </plist>
           EOF
 
           echo "=========================================="
-          echo "ExportOptions.plist"
+          echo "ExportOptions.plist criado."
           echo "=========================================="
 
           cat ios/ExportOptions.plist
@@ -603,7 +536,7 @@ jobs:
         run: |
           set -e
 
-          IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -n 1)
 
           if [ -z "$IPA" ]; then
             echo "ERRO: IPA não foi criado."
@@ -617,30 +550,33 @@ jobs:
           ls -lh "$IPA"
 
       # =========================================================
-      # VERIFY SIGNING
+      # VERIFY IPA SIGNING
       # =========================================================
 
       - name: Verify IPA signing
         run: |
           set -e
 
-          IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -n 1)
 
-          mkdir -p "$RUNNER_TEMP/ipa-check"
+          CHECK_DIR="$RUNNER_TEMP/ipa-check"
+
+          rm -rf "$CHECK_DIR"
+          mkdir -p "$CHECK_DIR"
 
           unzip -q \
             "$IPA" \
-            -d "$RUNNER_TEMP/ipa-check"
+            -d "$CHECK_DIR"
 
           APP=$(find \
-            "$RUNNER_TEMP/ipa-check/Payload" \
+            "$CHECK_DIR/Payload" \
             -maxdepth 1 \
             -name "*.app" \
             -type d \
             | head -n 1)
 
           if [ -z "$APP" ]; then
-            echo "ERRO: APP não encontrado."
+            echo "ERRO: APP não encontrado dentro do IPA."
             exit 1
           fi
 
@@ -680,20 +616,28 @@ jobs:
         run: |
           set -e
 
-          IPA=$(find build/ios/ipa -name "*.ipa" | head -n 1)
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -n 1)
 
-          mkdir -p "$RUNNER_TEMP/bundle-check"
+          CHECK_DIR="$RUNNER_TEMP/bundle-check"
+
+          rm -rf "$CHECK_DIR"
+          mkdir -p "$CHECK_DIR"
 
           unzip -q \
             "$IPA" \
-            -d "$RUNNER_TEMP/bundle-check"
+            -d "$CHECK_DIR"
 
           APP=$(find \
-            "$RUNNER_TEMP/bundle-check/Payload" \
+            "$CHECK_DIR/Payload" \
             -maxdepth 1 \
             -name "*.app" \
             -type d \
             | head -n 1)
+
+          if [ -z "$APP" ]; then
+            echo "ERRO: APP não encontrado."
+            exit 1
+          fi
 
           BUNDLE_ID=$(
             /usr/libexec/PlistBuddy \
@@ -701,19 +645,24 @@ jobs:
               "$APP/Info.plist"
           )
 
-          echo "Bundle ID: $BUNDLE_ID"
+          echo "=========================================="
+          echo "BUNDLE ID"
+          echo "=========================================="
+
+          echo "Encontrado: $BUNDLE_ID"
+          echo "Esperado:   $APPLE_BUNDLE_ID"
 
           if [ "$BUNDLE_ID" != "$APPLE_BUNDLE_ID" ]; then
+            echo ""
             echo "ERRO: Bundle ID incorreto."
-            echo "Esperado: $APPLE_BUNDLE_ID"
-            echo "Encontrado: $BUNDLE_ID"
             exit 1
           fi
 
+          echo ""
           echo "Bundle ID correto."
 
       # =========================================================
-      # UPLOAD IPA
+      # UPLOAD IPA ARTIFACT
       # =========================================================
 
       - name: Upload IPA
@@ -725,7 +674,7 @@ jobs:
           retention-days: 30
 
       # =========================================================
-      # UPLOAD ARCHIVE
+      # UPLOAD ARCHIVE ARTIFACT
       # =========================================================
 
       - name: Upload Archive
