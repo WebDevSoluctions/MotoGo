@@ -166,6 +166,122 @@ jobs:
           echo "App ID: $PROFILE_APP_ID"
           echo "Push Notifications: ${APS_ENV:-NAO ENCONTRADO}"
 
+      - name: Compare certificate with provisioning profile
+        env:
+          PROFILE_PLIST: ${{ runner.temp }}/profile.plist
+        run: |
+          set -e
+
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+
+          echo "=========================================="
+          echo "CERTIFICADO DO .P12"
+          echo "=========================================="
+
+          echo "Identidades de assinatura encontradas:"
+          security find-identity \
+            -v \
+            -p codesigning \
+            "$KEYCHAIN"
+
+          echo ""
+          echo "Detalhes dos certificados no keychain:"
+          echo "------------------------------------------"
+
+          security find-certificate \
+            -a \
+            -Z \
+            "$KEYCHAIN" \
+            2>/dev/null || true
+
+          echo ""
+          echo "=========================================="
+          echo "CERTIFICADOS DO PROVISIONING PROFILE"
+          echo "=========================================="
+
+          python3 <<'PY'
+          import os
+          import plistlib
+          import subprocess
+          import tempfile
+
+          profile_path = os.environ["PROFILE_PLIST"]
+
+          with open(profile_path, "rb") as f:
+              plist = plistlib.load(f)
+
+          certificates = plist.get("DeveloperCertificates", [])
+
+          print(f"Quantidade de certificados no profile: {len(certificates)}")
+
+          for index, cert_data in enumerate(certificates, start=1):
+              cert_path = None
+
+              try:
+                  with tempfile.NamedTemporaryFile(
+                      suffix=".cer",
+                      delete=False
+                  ) as tmp:
+                      tmp.write(cert_data)
+                      cert_path = tmp.name
+
+                  result = subprocess.run(
+                      [
+                          "openssl",
+                          "x509",
+                          "-inform",
+                          "DER",
+                          "-in",
+                          cert_path,
+                          "-noout",
+                          "-subject",
+                          "-issuer",
+                          "-serial",
+                          "-fingerprint",
+                          "-sha256",
+                      ],
+                      capture_output=True,
+                      text=True,
+                      check=False,
+                  )
+
+                  print("")
+                  print(f"--- CERTIFICADO {index} ---")
+                  if result.stdout.strip():
+                      print(result.stdout.strip())
+                  if result.stderr.strip():
+                      print(result.stderr.strip())
+
+              finally:
+                  if cert_path and os.path.exists(cert_path):
+                      os.unlink(cert_path)
+          PY
+
+          echo ""
+          echo "=========================================="
+          echo "VALIDANDO IDENTIDADE DO CERTIFICADO"
+          echo "=========================================="
+
+          IDENTITIES="$(security find-identity \
+            -v \
+            -p codesigning \
+            "$KEYCHAIN" || true)"
+
+          if echo "$IDENTITIES" | grep -q "Apple Distribution"; then
+            echo "Apple Distribution encontrada no .p12."
+          else
+            echo "ERRO: Apple Distribution nao encontrada no .p12."
+            echo "O Secret APPSTORE_CERTIFICATES_FILE_BASE64 pode conter"
+            echo "um certificado diferente do provisioning profile."
+            exit 1
+          fi
+
+          echo ""
+          echo "Diagnostico concluido."
+          echo "Se o certificado listado pelo .p12 nao estiver entre"
+          echo "os certificados do provisioning profile, sera necessario"
+          echo "regenerar o profile selecionando esse mesmo certificado."
+
       - name: Validate provisioning profile
         run: |
           set -e
