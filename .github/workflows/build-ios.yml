@@ -739,16 +739,16 @@ jobs:
           echo "ENVIANDO IPA PARA APP STORE CONNECT"
           echo "=========================================="
           echo "IPA: $IPA"
-          echo "Provider: $APPLE_TEAM_ID"
+          echo "Team ID: $APPLE_TEAM_ID"
 
-          xcrun iTMSTransporter \
-            -m upload \
-            -assetFile "$IPA" \
-            -u "$APPSTORE_USERNAME" \
-            -p "$APPSTORE_APP_SPECIFIC_PASSWORD" \
-            -asc_provider "$APPLE_TEAM_ID" \
-            -v eXtreme \
-            -WONoPause true
+          xcrun altool \
+            --upload-app \
+            --file "$IPA" \
+            --type ios \
+            --username "$APPSTORE_USERNAME" \
+            --password "$APPSTORE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --verbose
 
       - name: Cleanup signing keychain
         if: always()
