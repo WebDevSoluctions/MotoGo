@@ -27,9 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>O MotoGo usa sua localização para calcular rotas e acompanhar a corrida.</string>
+	<string>O MotoGo usa sua localizaÃƒÂ§ÃƒÂ£o para calcular rotas e acompanhar a corrida.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>O MotoGo usa sua localização para atualizar a posição do motorista durante uma corrida.</string>
+	<string>O MotoGo usa sua localizaÃƒÂ§ÃƒÂ£o para atualizar a posiÃƒÂ§ÃƒÂ£o do motorista durante uma corrida.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
@@ -75,9 +75,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 <key>NSCameraUsageDescription</key>
-<string>O MotoGo precisa acessar a c�mera para permitir que voc� tire fotos para o seu perfil.</string>
+<string>O MotoGo precisa acessar a cÃ¢mera para permitir que vocÃª tire fotos para o seu perfil.</string>
 <key>NSPhotoLibraryUsageDescription</key>
-<string>O MotoGo precisa acessar suas fotos para permitir que voc� escolha uma imagem para o seu perfil.</string>
+<string>O MotoGo precisa acessar suas fotos para permitir que vocÃª escolha uma imagem para o seu perfil.</string>
 </dict>
 </plist>
 
