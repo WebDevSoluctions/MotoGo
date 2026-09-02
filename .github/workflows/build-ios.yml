@@ -520,6 +520,9 @@ jobs:
 
               <key>compileBitcode</key>
               <false/>
+
+              <key>generateAppStoreInformation</key>
+              <true/>
           </dict>
           </plist>
           EOF
@@ -556,6 +559,27 @@ jobs:
           echo "=========================================="
 
           ls -lh "$IPA"
+
+      - name: Verify AppStoreInfo.plist
+        run: |
+          set -e
+
+          APPSTORE_INFO="build/ios/ipa/AppStoreInfo.plist"
+
+          echo "=========================================="
+          echo "VERIFICANDO APPSTOREINFO.PLIST"
+          echo "=========================================="
+
+          if [ ! -f "$APPSTORE_INFO" ]; then
+            echo "ERRO: AppStoreInfo.plist nao foi gerado."
+            echo "Conteudo de build/ios/ipa:"
+            ls -lah build/ios/ipa
+            exit 1
+          fi
+
+          plutil -lint "$APPSTORE_INFO"
+          ls -lh "$APPSTORE_INFO"
+          echo "AppStoreInfo.plist gerado com sucesso."
 
       - name: Verify IPA signing
         run: |
@@ -630,7 +654,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MotoGo-iOS-App-Store-IPA
-          path: build/ios/ipa/*.ipa
+          path: |
+            build/ios/ipa/*.ipa
+            build/ios/ipa/AppStoreInfo.plist
           if-no-files-found: error
           retention-days: 30
 
