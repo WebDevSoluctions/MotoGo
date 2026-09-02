@@ -74,5 +74,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+<key>NSCameraUsageDescription</key>
+<string>O MotoGo precisa acessar a câmera para permitir que você tire fotos para o seu perfil.</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>O MotoGo precisa acessar suas fotos para permitir que você escolha uma imagem para o seu perfil.</string>
 </dict>
 </plist>
+
