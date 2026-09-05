@@ -1437,6 +1437,47 @@ class _AdminDriversScreenState
       return;
     }
 
+    final TextEditingController reasonController =
+        TextEditingController();
+
+    final String? reason = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Reprovar motorista'),
+          content: TextField(
+            controller: reasonController,
+            autofocus: true,
+            maxLines: 4,
+            maxLength: 300,
+            decoration: const InputDecoration(
+              labelText: 'Motivo da reprovação',
+              hintText: 'Informe o motivo para o motorista.',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext)
+                  .pop(reasonController.text.trim()),
+              child: const Text('Reprovar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    reasonController.dispose();
+
+    if (reason == null || !mounted) {
+      return;
+    }
+
     setState(() {
       actionLoading = true;
     });
@@ -1446,6 +1487,7 @@ class _AdminDriversScreenState
           await ApiService.adminDriverAction(
         driverId: driverId,
         action: 'reject',
+        reason: reason,
       );
 
       if (!mounted) {

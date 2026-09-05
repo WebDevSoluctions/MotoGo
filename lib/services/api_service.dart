@@ -269,6 +269,7 @@ class ApiService {
           'user_id': userId,
 
           'ride_type': rideType,
+
           if (deliveryMode != null) 'delivery_mode': deliveryMode,
 
           'origin_address': originAddress,
@@ -326,6 +327,8 @@ class ApiService {
     }
 
   }
+
+
 
 
 
@@ -440,40 +443,71 @@ class ApiService {
   // ============================================================
 
 
+
   // ============================================================
+
   // STATUS DA CORRIDA - MOTORISTA
+
   // ============================================================
+
   // Consulta diretamente o status da corrida para o motorista.
+
   // Não depende do endpoint usado pelo passageiro.
+
   static Future<Map<String, dynamic>> getRideStatusForDriver({
+
     required int rideId,
+
     required int driverId,
+
   }) async {
+
     try {
+
       final uri = Uri.parse(
+
         '$baseUrl/rides/status_for_driver.php',
+
       ).replace(
+
         queryParameters: {
+
           'ride_id': rideId.toString(),
+
           'driver_id': driverId.toString(),
+
         },
+
       );
 
       final response = await http.get(
+
         uri,
+
         headers: {
+
           'Accept': 'application/json',
+
         },
+
       );
 
       return _decode(response);
+
     } catch (e) {
+
       return {
+
         'success': false,
+
         'message': 'Não foi possível consultar o status da corrida para o motorista.',
+
         'error': e.toString(),
+
       };
+
     }
+
   }
 
   // HISTÓRICO REAL DO PASSAGEIRO
@@ -639,51 +673,36 @@ class ApiService {
   // ============================================================
 
   static Future<Map<String, dynamic>> adminDriverAction({
-
     required int driverId,
-
     required String action,
-
+    String reason = '',
   }) async {
-
     try {
+      final body = <String, dynamic>{
+        'driver_id': driverId,
+        'action': action,
+      };
+
+      if (reason.trim().isNotEmpty) {
+        body['reason'] = reason.trim();
+      }
 
       final response = await http.post(
-
         Uri.parse('$baseUrl/admin/driver_action.php'),
-
         headers: {
-
           'Content-Type': 'application/json',
-
           'Accept': 'application/json',
-
         },
-
-        body: jsonEncode({
-
-          'driver_id': driverId,
-
-          'action': action,
-
-        }),
-
+        body: jsonEncode(body),
       );
 
       return _decode(response);
-
     } catch (_) {
-
       return {
-
         'success': false,
-
         'message': 'Não foi possível conectar à API.',
-
       };
-
     }
-
   }
 
   // ============================================================
@@ -1120,6 +1139,10 @@ class ApiService {
 
 
 
+
+
+
+
   // ============================================================
 
   // CLIENTE - PERFIL
@@ -1181,6 +1204,42 @@ class ApiService {
     } catch (e) {
 
       return {'success': false, 'message': 'Não foi possível salvar os dados do motorista.', 'error': e.toString()};
+
+    }
+
+  }
+
+  // ============================================================
+
+  // CIDADES ATENDIDAS - PÚBLICO
+
+  // ============================================================
+
+  static Future<Map<String, dynamic>> getServiceCities() async {
+
+    try {
+
+      final response = await http.get(
+
+        Uri.parse('$baseUrl/service_cities.php'),
+
+        headers: {'Accept': 'application/json'},
+
+      ).timeout(const Duration(seconds: 10));
+
+      return _decode(response);
+
+    } catch (e) {
+
+      return {
+
+        'success': false,
+
+        'message': 'Não foi possível carregar as cidades atendidas.',
+
+        'error': e.toString(),
+
+      };
 
     }
 
@@ -1845,6 +1904,8 @@ class ApiService {
     }
 
   }
+
+
 
 
 

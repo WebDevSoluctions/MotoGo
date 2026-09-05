@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../config/colors.dart';
 import '../../controllers/register_controller.dart';
+import '../../services/api_service.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -30,6 +31,45 @@ class _RegisterScreenState
   bool obscureConfirmPassword = true;
 
   bool isLoading = false;
+
+  List<Map<String, String>> serviceCities = [];
+  bool citiesLoading = true;
+  bool citiesLoadFailed = false;
+
+  // ============================================================
+  // INIT
+  // ============================================================
+
+  @override
+  void initState() {
+    super.initState();
+    _loadServiceCities();
+  }
+
+  Future<void> _loadServiceCities() async {
+    final result = await ApiService.getServiceCities();
+    if (!mounted) return;
+
+    final raw = result['cities'];
+    final loaded = <Map<String, String>>[];
+    if (result['success'] == true && raw is List) {
+      for (final item in raw) {
+        if (item is Map) {
+          final city = item['city']?.toString().trim() ?? '';
+          final state = item['state']?.toString().trim().toUpperCase() ?? '';
+          if (city.isNotEmpty && state.length == 2) {
+            loaded.add({'city': city, 'state': state});
+          }
+        }
+      }
+    }
+
+    setState(() {
+      serviceCities = loaded;
+      citiesLoading = false;
+      citiesLoadFailed = result['success'] != true;
+    });
+  }
 
   // ============================================================
   // DISPOSE
@@ -321,41 +361,104 @@ class _RegisterScreenState
                 height: 18,
               ),
 
-              TextField(
-                controller: controller.cityController,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  hintText: 'Cidade',
-                  prefixIcon: Icon(Icons.location_city_outlined),
+              if (citiesLoading)
+                const InputDecorator(
+                  decoration: InputDecoration(
+                    hintText: 'Carregando cidades atendidas...',
+                    prefixIcon: Icon(Icons.location_city_outlined),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.only(left: 8),
+                    child: SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else if (serviceCities.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  value: controller.cityController.text.isEmpty
+                      ? null
+                      : serviceCities.any((item) =>
+                              item['city'] == controller.cityController.text &&
+                              item['state'] == controller.stateController.text)
+                          ? '${controller.cityController.text}|${controller.stateController.text}'
+                          : null,
+                  decoration: const InputDecoration(
+                    hintText: 'Cidade',
+                    prefixIcon: Icon(Icons.location_city_outlined),
+                  ),
+                  items: serviceCities.map((item) {
+                    final city = item['city']!;
+                    final state = item['state']!;
+                    return DropdownMenuItem<String>(
+                      value: '$city|$state',
+                      child: Text('$city - $state'),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    final parts = value.split('|');
+                    if (parts.length != 2) return;
+                    setState(() {
+                      controller.cityController.text = parts[0];
+                      controller.stateController.text = parts[1];
+                    });
+                  },
+                  validator: (value) => value == null || value.isEmpty
+                      ? 'Selecione sua cidade.'
+                      : null,
+                )
+              else
+                TextField(
+                  controller: controller.cityController,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.next,
+                  decoration: InputDecoration(
+                    hintText: 'Cidade',
+                    prefixIcon: const Icon(Icons.location_city_outlined),
+                    helperText: citiesLoadFailed
+                        ? 'Não foi possível carregar a lista. Tente novamente.'
+                        : null,
+                  ),
                 ),
-              ),
 
               const SizedBox(height: 18),
 
-              DropdownButtonFormField<String>(
-                value: controller.stateController.text.isEmpty
-                    ? null
-                    : controller.stateController.text,
-                decoration: const InputDecoration(
-                  hintText: 'Estado',
-                  prefixIcon: Icon(Icons.map_outlined),
+              if (serviceCities.isNotEmpty)
+                TextFormField(
+                  controller: controller.stateController,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Estado',
+                    prefixIcon: Icon(Icons.map_outlined),
+                  ),
+                )
+              else
+                DropdownButtonFormField<String>(
+                  value: controller.stateController.text.isEmpty
+                      ? null
+                      : controller.stateController.text,
+                  decoration: const InputDecoration(
+                    hintText: 'Estado',
+                    prefixIcon: Icon(Icons.map_outlined),
+                  ),
+                  items: const [
+                    'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
+                    'MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
+                  ].map((uf) => DropdownMenuItem<String>(
+                    value: uf,
+                    child: Text(uf),
+                  )).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        controller.stateController.text = value;
+                      });
+                    }
+                  },
                 ),
-                items: const [
-                  'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
-                  'MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
-                ].map((uf) => DropdownMenuItem<String>(
-                  value: uf,
-                  child: Text(uf),
-                )).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      controller.stateController.text = value;
-                    });
-                  }
-                },
-              ),
 
               const SizedBox(height: 18),
 

@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 
 import '../../../config/colors.dart';
 import '../../../services/driver_service.dart';
+import '../../../services/api_service.dart';
 
 class DriverRegisterScreen extends StatefulWidget {
   const DriverRegisterScreen({super.key});
@@ -37,6 +38,41 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
 
   String driverType = 'moto';
   String cnhCategory = 'A';
+
+  List<Map<String, String>> serviceCities = [];
+  bool citiesLoading = true;
+  bool citiesLoadFailed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadServiceCities();
+  }
+
+  Future<void> _loadServiceCities() async {
+    final result = await ApiService.getServiceCities();
+    if (!mounted) return;
+
+    final raw = result['cities'];
+    final loaded = <Map<String, String>>[];
+    if (result['success'] == true && raw is List) {
+      for (final item in raw) {
+        if (item is Map) {
+          final city = item['city']?.toString().trim() ?? '';
+          final state = item['state']?.toString().trim().toUpperCase() ?? '';
+          if (city.isNotEmpty && state.length == 2) {
+            loaded.add({'city': city, 'state': state});
+          }
+        }
+      }
+    }
+
+    setState(() {
+      serviceCities = loaded;
+      citiesLoading = false;
+      citiesLoadFailed = result['success'] != true;
+    });
+  }
 
   final driverTypes = const [
     {
@@ -359,42 +395,111 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                 ),
                 const SizedBox(height: 14),
 
-                _input(
-                  controller: cityController,
-                  label: 'Cidade onde irá trabalhar',
-                  hint: 'Ex.: Tiradentes',
-                  icon: Icons.location_city_outlined,
-                  textCapitalization: TextCapitalization.words,
-                  validator: (value) {
-                    if (value == null || value.trim().length < 2) {
-                      return 'Digite sua cidade de operação.';
-                    }
-                    return null;
-                  },
-                ),
+                if (citiesLoading)
+                  InputDecorator(
+                    decoration: _inputDecoration(
+                      label: 'Cidade onde irá trabalhar',
+                      hint: 'Carregando cidades atendidas...',
+                      icon: Icons.location_city_outlined,
+                    ),
+                    child: const SizedBox(
+                      height: 20,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
+                  )
+                else if (serviceCities.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    value: cityController.text.isEmpty
+                        ? null
+                        : serviceCities.any((item) =>
+                                item['city'] == cityController.text &&
+                                item['state'] == stateController.text)
+                            ? '${cityController.text}|${stateController.text}'
+                            : null,
+                    decoration: _inputDecoration(
+                      label: 'Cidade onde irá trabalhar',
+                      hint: 'Selecione a cidade',
+                      icon: Icons.location_city_outlined,
+                    ),
+                    items: serviceCities.map((item) {
+                      final city = item['city']!;
+                      final state = item['state']!;
+                      return DropdownMenuItem<String>(
+                        value: '$city|$state',
+                        child: Text('$city - $state'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      final parts = value.split('|');
+                      if (parts.length != 2) return;
+                      setState(() {
+                        cityController.text = parts[0];
+                        stateController.text = parts[1];
+                      });
+                    },
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Selecione sua cidade de operação.'
+                        : null,
+                  )
+                else
+                  _input(
+                    controller: cityController,
+                    label: 'Cidade onde irá trabalhar',
+                    hint: 'Ex.: Tiradentes',
+                    icon: Icons.location_city_outlined,
+                    textCapitalization: TextCapitalization.words,
+                    validator: (value) {
+                      if (value == null || value.trim().length < 2) {
+                        return 'Digite sua cidade de operação.';
+                      }
+                      return null;
+                    },
+                  ),
                 const SizedBox(height: 14),
 
-                DropdownButtonFormField<String>(
-                  value: stateController.text.isEmpty ? null : stateController.text,
-                  decoration: _inputDecoration(
-                    label: 'Estado',
-                    hint: 'Selecione a UF',
-                    icon: Icons.map_outlined,
+                if (serviceCities.isNotEmpty)
+                  TextFormField(
+                    controller: stateController,
+                    readOnly: true,
+                    decoration: _inputDecoration(
+                      label: 'Estado',
+                      hint: 'Estado da cidade selecionada',
+                      icon: Icons.map_outlined,
+                    ),
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Selecione sua cidade.'
+                        : null,
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    value: stateController.text.isEmpty ? null : stateController.text,
+                    decoration: _inputDecoration(
+                      label: 'Estado',
+                      hint: 'Selecione a UF',
+                      icon: Icons.map_outlined,
+                    ),
+                    items: const [
+                      'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
+                      'MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
+                    ].map((uf) => DropdownMenuItem<String>(
+                      value: uf,
+                      child: Text(uf),
+                    )).toList(),
+                    onChanged: (value) {
+                      if (value != null) setState(() => stateController.text = value);
+                    },
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Selecione seu estado.'
+                        : null,
                   ),
-                  items: const [
-                    'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
-                    'MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
-                  ].map((uf) => DropdownMenuItem<String>(
-                    value: uf,
-                    child: Text(uf),
-                  )).toList(),
-                  onChanged: (value) {
-                    if (value != null) setState(() => stateController.text = value);
-                  },
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'Selecione seu estado.'
-                      : null,
-                ),
                 const SizedBox(height: 14),
 
                 _input(
