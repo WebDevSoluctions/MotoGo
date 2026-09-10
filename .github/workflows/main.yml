@@ -645,8 +645,8 @@ jobs:
           echo "Version: $VERSION"
           echo "Build: $BUILD"
 
-          if [ "$VERSION" != "1.0.5" ]; then
-            echo "ERRO: Versao esperada 1.0.5."
+          if [ "$VERSION" != "1.0.6" ]; then
+            echo "ERRO: Versao esperada 1.0.6."
             exit 1
           fi
 
