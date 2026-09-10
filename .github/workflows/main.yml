@@ -651,7 +651,7 @@ jobs:
           fi
 
           if [ "$BUILD" != "8" ]; then
-            echo "ERRO: Build esperado 8."
+            echo "ERRO: Build esperado 9."
             exit 1
           fi
 
