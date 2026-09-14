@@ -645,13 +645,13 @@ jobs:
           echo "Version: $VERSION"
           echo "Build: $BUILD"
 
-          if [ "$VERSION" != "1.0.7" ]; then
-            echo "ERRO: Versao esperada 1.0.7."
+          if [ "$VERSION" != "1.0.8" ]; then
+            echo "ERRO: Versao esperada 1.0.8."
             exit 1
           fi
 
-          if [ "$BUILD" != "10" ]; then
-            echo "ERRO: Build esperado 10."
+          if [ "$BUILD" != "11" ]; then
+            echo "ERRO: Build esperado 11."
             exit 1
           fi
 
@@ -756,6 +756,8 @@ jobs:
           security delete-keychain \
             "$RUNNER_TEMP/build.keychain-db" \
             || true
+
+
 
 
 
