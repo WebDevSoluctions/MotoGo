@@ -3,7 +3,7 @@ description: Aplicativo de Mototáxi e Delivery
 
 publish_to: "none"
 
-version: 1.0.9+12
+version: 1.0.9+13
 
 environment:
   sdk: ">=3.8.0 <4.0.0"
