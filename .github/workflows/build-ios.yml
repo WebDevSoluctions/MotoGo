@@ -650,8 +650,8 @@ jobs:
             exit 1
           fi
 
-          if [ "$BUILD" != "13" ]; then
-            echo "ERRO: Build esperado 13."
+          if [ "$BUILD" != "1" ]; then
+            echo "ERRO: Build esperado 1."
             exit 1
           fi
 
