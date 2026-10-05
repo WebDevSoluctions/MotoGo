@@ -650,8 +650,8 @@ jobs:
             exit 1
           fi
 
-          if [ "$BUILD" != "16" ]; then
-            echo "ERRO: Build esperado 16."
+          if [ "$BUILD" != "17" ]; then
+            echo "ERRO: Build esperado 17."
             exit 1
           fi
 
@@ -756,6 +756,8 @@ jobs:
           security delete-keychain \
             "$RUNNER_TEMP/build.keychain-db" \
             || true
+
+
 
 
 
