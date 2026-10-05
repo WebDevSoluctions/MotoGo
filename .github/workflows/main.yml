@@ -645,8 +645,8 @@ jobs:
           echo "Version: $VERSION"
           echo "Build: $BUILD"
 
-          if [ "$VERSION" != "2.0.0" ]; then
-            echo "ERRO: Versao esperada 2.0.0."
+          if [ "$VERSION" != "2.0.1" ]; then
+            echo "ERRO: Versao esperada 2.0.1."
             exit 1
           fi
 
@@ -756,6 +756,8 @@ jobs:
           security delete-keychain \
             "$RUNNER_TEMP/build.keychain-db" \
             || true
+
+
 
 
 
