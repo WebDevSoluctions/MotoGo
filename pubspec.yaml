@@ -3,7 +3,7 @@ description: Aplicativo de Mototáxi e Delivery Corridas
 
 publish_to: "none"
 
-version: 2.0.0+16
+version: 2.0.0+17
 
 environment:
   sdk: ">=3.8.0 <4.0.0"
@@ -148,5 +148,6 @@ flutter:
     - assets/icons/
     - assets/lottie/
     - assets/sounds/
+
 
 
