@@ -1,4 +1,4 @@
-name: MotoGo iOS App Store Build
+﻿name: MotoGo iOS App Store Build
 
 on:
   workflow_dispatch:
@@ -645,13 +645,13 @@ jobs:
           echo "Version: $VERSION"
           echo "Build: $BUILD"
 
-          if [ "$VERSION" != "2.0.1" ]; then
-            echo "ERRO: Versao esperada 2.0.1."
+          if [ "$VERSION" != "2.0.2" ]; then
+            echo "ERRO: Versao esperada 2.0.2."
             exit 1
           fi
 
-          if [ "$BUILD" != "17" ]; then
-            echo "ERRO: Build esperado 17."
+          if [ "$BUILD" != "18" ]; then
+            echo "ERRO: Build esperado 18."
             exit 1
           fi
 
@@ -756,6 +756,9 @@ jobs:
           security delete-keychain \
             "$RUNNER_TEMP/build.keychain-db" \
             || true
+
+
+
 
 
 
